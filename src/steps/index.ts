@@ -1,0 +1,11 @@
+import './decode';
+import './resize';
+import './grayscale';
+import './encode';
+import './hash';
+import './pixelDiff';
+import './psnr';
+import './ssim';
+import './dhash';
+import './phash';
+import './inspectMetadata';
