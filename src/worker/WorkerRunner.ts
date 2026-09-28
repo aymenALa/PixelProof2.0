@@ -1,7 +1,7 @@
-import type { Bytes, Ctx, StepSpec } from '../core/types';
+import type { Bytes, Ctx, Report, StepSpec } from '../core/types';
 import type { Runner } from '../core/runner';
 
-interface WorkerSuccess { readonly id: string; readonly ok: true; readonly blob: Blob; readonly report: Record<string, unknown>; }
+interface WorkerSuccess { readonly id: string; readonly ok: true; readonly blob: Blob; readonly report: Report; }
 interface WorkerFailure { readonly id: string; readonly ok: false; readonly error: string; }
 type WorkerResponse = WorkerSuccess | WorkerFailure;
 

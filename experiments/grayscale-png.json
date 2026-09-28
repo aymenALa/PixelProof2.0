@@ -1,5 +1,5 @@
 [
-  { "type": "inspectMetadata" },
+  { "type": "inspectMetadata", "opts": { "target": "input" } },
   { "type": "decode" },
   { "type": "grayscale" },
   { "type": "encode", "opts": { "type": "image/png" } },
@@ -10,5 +10,5 @@
   { "type": "dhash" },
   { "type": "phash" },
   { "type": "encode", "opts": { "type": "image/png" } },
-  { "type": "hash", "opts": { "label": "output" } }
+  { "type": "hash", "opts": { "target": "output" } }
 ]

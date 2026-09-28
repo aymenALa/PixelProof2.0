@@ -10,7 +10,7 @@ test.describe('browser image steps', () => {
   test('decodes EXIF orientation fixture and completes a raster round trip', async ({ page }) => {
     const result = await page.evaluate(async ({ bytes }) => {
       const api = (globalThis as typeof globalThis & { __pixelproof: { InlineRunner: new () => { run(input: Blob, specs: unknown[], ctx: unknown): Promise<unknown> } } }).__pixelproof;
-      const context = { signal: new AbortController().signal, report: {} as Record<string, unknown> };
+      const context = { signal: new AbortController().signal, report: { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' } };
       const output = await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)]), [
         { type: 'decode' }, { type: 'resize', opts: { maxWidth: 100 } }, { type: 'encode', opts: { type: 'image/png' } },
       ], context);
@@ -25,7 +25,7 @@ test.describe('browser image steps', () => {
     const error = await page.evaluate(async ({ bytes }) => {
       const api = (globalThis as typeof globalThis & { __pixelproof: { InlineRunner: new () => { run(input: Blob, specs: unknown[], ctx: unknown): Promise<unknown> } } }).__pixelproof;
       try {
-        await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'decode' }, { type: 'encode', opts: { type: 'image/png' } }], { signal: new AbortController().signal, report: {} });
+        await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'decode' }, { type: 'encode', opts: { type: 'image/png' } }], { signal: new AbortController().signal, report: { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' } });
         return null;
       } catch (cause) { return cause instanceof Error ? cause.message : String(cause); }
     }, { bytes: fixture('corrupt.bin') });
@@ -33,7 +33,7 @@ test.describe('browser image steps', () => {
 
     const renamedResult = await page.evaluate(async ({ bytes }) => {
       const api = (globalThis as typeof globalThis & { __pixelproof: { InlineRunner: new () => { run(input: Blob, specs: unknown[], ctx: unknown): Promise<unknown> } } }).__pixelproof;
-      const output = await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'decode' }, { type: 'encode', opts: { type: 'image/png' } }], { signal: new AbortController().signal, report: {} });
+      const output = await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'decode' }, { type: 'encode', opts: { type: 'image/png' } }], { signal: new AbortController().signal, report: { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' } });
       return (output as { kind: string }).kind;
     }, { bytes: fixture('png-renamed.jpg') });
     expect(renamedResult).toBe('bytes');
@@ -43,26 +43,57 @@ test.describe('browser image steps', () => {
     const hashes = await page.evaluate(async ({ bytes }) => {
       const api = (globalThis as typeof globalThis & { __pixelproof: { InlineRunner: new () => { run(input: Blob, specs: unknown[], ctx: { signal: AbortSignal; report: Record<string, unknown> }): Promise<unknown> } } }).__pixelproof;
       const run = async () => {
-        const report: Record<string, unknown> = {};
-        await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'hash', opts: { label: 'fixture' } }], { signal: new AbortController().signal, report });
-        return report['sha256:fixture'];
+        const report = { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' } as { input: { sha256?: string }; output: { sha256?: string } };
+        await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'hash', opts: { target: 'input' } }], { signal: new AbortController().signal, report });
+        return report.input.sha256;
       };
       return [await run(), await run()];
     }, { bytes: fixture('transparent.png') });
     expect(hashes[0]).toBe(hashes[1]);
   });
 
+  test('invisible-repack changes bytes, preserves pixels, and removes metadata', async ({ page }) => {
+    const result = await page.evaluate(async ({ bytes }) => {
+      const api = (globalThis as typeof globalThis & { __pixelproof: { InlineRunner: new () => { run(input: Blob, specs: unknown[], ctx: unknown): Promise<{ blob: Blob }> } } }).__pixelproof;
+      const report = { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' };
+      const specs = [
+        { type: 'hash', opts: { target: 'input' } },
+        { type: 'inspectMetadata', opts: { target: 'input' } },
+        { type: 'decode' },
+        { type: 'pixelDiff' },
+        { type: 'psnr', opts: { mode: 'channel' } },
+        { type: 'encode', opts: { type: 'image/png' } },
+        { type: 'hash', opts: { target: 'output' } },
+        { type: 'inspectMetadata', opts: { target: 'output' } },
+      ];
+      const output = await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' }), specs, { signal: new AbortController().signal, report });
+      const serialized = JSON.parse(JSON.stringify(report, (_key, value) => typeof value === 'number' && !Number.isFinite(value) ? String(value) : value));
+      return { report: serialized, outputBytes: output.blob.size };
+    }, { bytes: fixture('exif-orientation-gps.jpg') });
+    expect(result.report.output.sha256).not.toBe(result.report.input.sha256);
+    expect(result.report.comparison.pixelDiff.changedPixels).toBe(0);
+    expect(result.report.comparison.psnr.luma).toBe('Infinity');
+    expect(result.report.comparison.psnr.channels).toEqual({ r: 'Infinity', g: 'Infinity', b: 'Infinity' });
+    expect(result.report.input.metadata.jpeg.APP1).toBe(true);
+    expect(result.report.input.metadata.jpeg.gps.GPSLatitude).toBeCloseTo(40.7128, 6);
+    expect(result.report.input.metadata.jpeg.gps.GPSLongitude).toBeCloseTo(-74.006, 6);
+    expect(result.report.output.metadata.png.eXIf).toBe(false);
+    expect(result.report.output.metadata.png.iTXt).toBe(false);
+    expect(result.report.output.metadata.jpeg.gps).toBeUndefined();
+    expect(result.report.output.bytes).not.toBe(result.report.input.bytes);
+  });
+
   test('WorkerRunner executes the same declared pipeline and supports abort', async ({ page }) => {
     const result = await page.evaluate(async ({ bytes }) => {
       const api = (globalThis as typeof globalThis & { __pixelproof: { WorkerRunner: new () => { run(input: Blob, specs: unknown[], ctx: { signal: AbortSignal; report: Record<string, unknown> }): Promise<unknown> } } }).__pixelproof;
-      const report: Record<string, unknown> = {};
-      const output = await new api.WorkerRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'decode' }, { type: 'encode', opts: { type: 'image/png' } }, { type: 'hash', opts: { label: 'worker' } }], { signal: new AbortController().signal, report });
+      const report = { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' } as { input: { sha256?: string }; output: { sha256?: string } };
+      const output = await new api.WorkerRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'decode' }, { type: 'encode', opts: { type: 'image/png' } }, { type: 'hash', opts: { target: 'output' } }], { signal: new AbortController().signal, report });
       const controller = new AbortController();
-      const pending = new api.WorkerRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'decode' }, { type: 'encode', opts: { type: 'image/png' } }], { signal: controller.signal, report: {} });
+      const pending = new api.WorkerRunner().run(new Blob([new Uint8Array(bytes)]), [{ type: 'decode' }, { type: 'encode', opts: { type: 'image/png' } }], { signal: controller.signal, report: { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' } });
       controller.abort();
       let cancelled = false;
       try { await pending; } catch (cause) { cancelled = cause instanceof Error && /aborted/i.test(cause.message); }
-      return { kind: (output as { kind: string }).kind, hash: report['sha256:worker'], cancelled };
+      return { kind: (output as { kind: string }).kind, hash: report.output.sha256, cancelled };
     }, { bytes: fixture('transparent.png') });
     expect(result.kind).toBe('bytes');
     expect(result.hash).toMatch(/^[0-9a-f]{64}$/);
@@ -72,10 +103,24 @@ test.describe('browser image steps', () => {
   test('UI exposes worker toggle, run, cancel, preview, and report', async ({ page }) => {
     await page.locator('input[type="file"]').setInputFiles(join(process.cwd(), 'tests', 'fixtures', 'transparent.png'));
     await expect(page.getByRole('combobox', { name: 'Runner' })).toHaveValue('worker');
+    await expect(page.getByRole('combobox', { name: 'Preset' })).toHaveValue('invisible-repack');
     await page.getByRole('button', { name: 'Run pipeline' }).click();
     await expect(page.getByRole('img', { name: 'Processed output' })).toBeVisible();
-    await expect(page.getByText('sha256:output')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Download image' })).toHaveAttribute('download', 'pixelproof-output.png');
+    await expect(page.locator('.report')).toContainText('sha256');
+    await expect(page.locator('.report')).toContainText('pixelDiff');
+    await expect(page.locator('.report')).toContainText('encode');
     await expect(page.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  });
+
+  test('accepts an image dropped onto the upload area', async ({ page }) => {
+    const upload = page.locator('.file-input');
+    await page.evaluate(({ bytes }) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(new File([new Uint8Array(bytes)], 'transparent.png', { type: 'image/png' }));
+      document.querySelector('.file-input')?.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+    }, { bytes: fixture('transparent.png') });
+    await expect(upload).toContainText('transparent.png');
   });
 
   test('processes a 12 MP raster through WorkerRunner without blocking the page', async ({ page }) => {

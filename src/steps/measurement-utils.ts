@@ -1,6 +1,7 @@
 import type { Ctx, Raster } from '../core/types';
 
 export interface ImageDataLike { readonly width: number; readonly height: number; readonly data: ArrayLike<number>; }
+export type MetricMode = 'luma' | 'channel';
 export interface PixelDiffResult { readonly maxAbsDiff: number; readonly changedPixels: number; readonly changedPercent: number; }
 
 export function readRaster(raster: Raster): ImageDataLike {
@@ -10,7 +11,7 @@ export function readRaster(raster: Raster): ImageDataLike {
 }
 
 export function reportMetricError(ctx: Ctx, metric: string, message: string): void {
-  const errors = (ctx.report.errors ??= {}) as Record<string, string>;
+  const errors = (ctx.report.comparison.errors ??= {}) as Record<string, string>;
   errors[metric] = message;
 }
 
@@ -48,10 +49,10 @@ export function psnrValues(left: readonly number[], right: readonly number[]): n
   return error === 0 ? Infinity : 10 * Math.log10((255 ** 2) / error);
 }
 
-export function psnr(original: ImageDataLike, current: ImageDataLike, perChannel = false): { luma: number; channels?: { r: number; g: number; b: number } } {
+export function psnr(original: ImageDataLike, current: ImageDataLike, mode: MetricMode = 'luma'): { luma: number; channels?: { r: number; g: number; b: number } } {
   if (original.width !== current.width || original.height !== current.height) throw new Error('psnr requires equal image dimensions');
   const result: { luma: number; channels?: { r: number; g: number; b: number } } = { luma: psnrValues(channelValues(original, 'luma'), channelValues(current, 'luma')) };
-  if (perChannel) result.channels = { r: psnrValues(channelValues(original, 0), channelValues(current, 0)), g: psnrValues(channelValues(original, 1), channelValues(current, 1)), b: psnrValues(channelValues(original, 2), channelValues(current, 2)) };
+  if (mode === 'channel') result.channels = { r: psnrValues(channelValues(original, 0), channelValues(current, 0)), g: psnrValues(channelValues(original, 1), channelValues(current, 1)), b: psnrValues(channelValues(original, 2), channelValues(current, 2)) };
   return result;
 }
 
@@ -64,11 +65,16 @@ export function ssimValues(left: readonly number[], right: readonly number[]): n
   return ((2 * leftMean * rightMean + c1) * (2 * covariance + c2)) / ((leftMean ** 2 + rightMean ** 2 + c1) * (leftVariance + rightVariance + c2));
 }
 
-export function ssim(original: ImageDataLike, current: ImageDataLike, perChannel = false): { luma: number; channels?: { r: number; g: number; b: number } } {
+export function ssim(original: ImageDataLike, current: ImageDataLike, mode: MetricMode = 'luma'): { luma: number; channels?: { r: number; g: number; b: number } } {
   if (original.width !== current.width || original.height !== current.height) throw new Error('ssim requires equal image dimensions');
   const result: { luma: number; channels?: { r: number; g: number; b: number } } = { luma: ssimValues(channelValues(original, 'luma'), channelValues(current, 'luma')) };
-  if (perChannel) result.channels = { r: ssimValues(channelValues(original, 0), channelValues(current, 0)), g: ssimValues(channelValues(original, 1), channelValues(current, 1)), b: ssimValues(channelValues(original, 2), channelValues(current, 2)) };
+  if (mode === 'channel') result.channels = { r: ssimValues(channelValues(original, 0), channelValues(current, 0)), g: ssimValues(channelValues(original, 1), channelValues(current, 1)), b: ssimValues(channelValues(original, 2), channelValues(current, 2)) };
   return result;
+}
+
+export function metricMode(opts: Record<string, unknown> | undefined): MetricMode {
+  if (opts?.mode === 'channel' || opts?.perChannel === true) return 'channel';
+  return 'luma';
 }
 
 function sampleGrayscale(image: ImageDataLike, width: number, height: number): number[] {

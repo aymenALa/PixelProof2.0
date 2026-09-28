@@ -35,7 +35,7 @@ function png(width, height, pixels) {
 }
 
 function exifPayload() {
-  const payload = Buffer.alloc(96);
+  const payload = Buffer.alloc(160);
   payload.write('Exif\0\0', 0, 'ascii');
   const tiff = 6;
   payload.write('MM', tiff, 'ascii');
@@ -44,13 +44,24 @@ function exifPayload() {
   payload.writeUInt16BE(2, tiff + 8);
   let entry = tiff + 10;
   payload.writeUInt16BE(0x0112, entry); payload.writeUInt16BE(3, entry + 2); payload.writeUInt32BE(1, entry + 4); payload.writeUInt16BE(6, entry + 8); entry += 12;
-  payload.writeUInt16BE(0x8825, entry); payload.writeUInt16BE(4, entry + 2); payload.writeUInt32BE(1, entry + 4); payload.writeUInt32BE(54, entry + 8);
-  payload.writeUInt16BE(1, tiff + 54);
-  payload.writeUInt16BE(0x0000, tiff + 56); payload.writeUInt16BE(1, tiff + 58); payload.writeUInt32BE(4, tiff + 60); payload.set([2, 3, 0, 0], tiff + 64);
-  return payload.subarray(0, tiff + 68);
+  payload.writeUInt16BE(0x8825, entry); payload.writeUInt16BE(4, entry + 2); payload.writeUInt32BE(1, entry + 4); payload.writeUInt32BE(38, entry + 8);
+  const gps = tiff + 38;
+  payload.writeUInt16BE(4, gps);
+  const writeEntry = (offset, tag, type, count, value) => { payload.writeUInt16BE(tag, offset); payload.writeUInt16BE(type, offset + 2); payload.writeUInt32BE(count, offset + 4); payload.writeUInt32BE(value, offset + 8); };
+  writeEntry(gps + 2, 1, 2, 2, 0);
+  writeEntry(gps + 14, 2, 5, 3, 96);
+  writeEntry(gps + 26, 3, 2, 2, 0);
+  writeEntry(gps + 38, 4, 5, 3, 120);
+  payload.writeUInt32BE(0x4e000000, gps + 2 + 8);
+  payload.writeUInt32BE(0x57000000, gps + 26 + 8);
+  const rational = (offset, numerator, denominator) => { payload.writeUInt32BE(numerator, tiff + offset); payload.writeUInt32BE(denominator, tiff + offset + 4); };
+  rational(96, 40, 1); rational(104, 42, 1); rational(112, 4608, 100);
+  rational(120, 74, 1); rational(128, 0, 1); rational(136, 216, 10);
+  return payload.subarray(0, tiff + 144);
 }
 
 const transparent = png(2, 1, Buffer.from([255, 0, 0, 0, 0, 0, 255, 255]));
+const rgb2x2 = png(2, 2, Buffer.from([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]));
 const large = png(4096, 2, Buffer.alloc(4096 * 2 * 4, 80));
 
 async function generate() {
@@ -72,6 +83,7 @@ async function generate() {
   const jpeg = Buffer.concat([onePixelJpeg.subarray(0, 2), Buffer.from([0xff, 0xe1]), Buffer.from([(exif.length + 2) >> 8, (exif.length + 2) & 0xff]), exif, onePixelJpeg.subarray(2)]);
   writeFileSync(new URL('exif-orientation-gps.jpg', fixtureDir), jpeg);
   writeFileSync(new URL('transparent.png', fixtureDir), transparent);
+  writeFileSync(new URL('rgb-2x2.png', fixtureDir), rgb2x2);
   writeFileSync(new URL('corrupt.bin', fixtureDir), Buffer.from('not-a-real-image'));
   writeFileSync(new URL('png-renamed.jpg', fixtureDir), transparent);
   writeFileSync(new URL('large-dimension.png', fixtureDir), large);

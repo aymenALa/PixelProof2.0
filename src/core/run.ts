@@ -1,4 +1,5 @@
 import { create } from './registry';
+import { createReport } from './report';
 import type { Bytes, Ctx, Payload, Raster, Stage, Step, StepSpec } from './types';
 
 function throwIfAborted(signal: AbortSignal): void {
@@ -21,9 +22,11 @@ export async function runPipeline(input: Blob, specs: readonly StepSpec[], ctx: 
   }
   if (stage !== 'bytes') throw new Error(`Pipeline must end in bytes, received ${stage}`);
 
-  const timings = (ctx.report.timings ??= {}) as Record<string, number>;
-  const memory = (ctx.report.rasterBytes ??= {}) as Record<string, number>;
-  ctx.report.userAgent = self.navigator.userAgent;
+  const report = ctx.report ?? createReport();
+  report.input.bytes = input.size;
+  const timings = report.timings;
+  const memory = report.rasterBytes;
+  report.userAgent = self.navigator.userAgent;
   let payload: Payload = { kind: 'bytes', blob: input };
   for (const [index, step] of steps.entries()) {
     if (index > 0) throwIfAborted(ctx.signal);
@@ -36,5 +39,6 @@ export async function runPipeline(input: Blob, specs: readonly StepSpec[], ctx: 
     }
   }
   if (payload.kind !== 'bytes') throw new Error('Pipeline must end in bytes');
+  report.output.bytes = payload.blob.size;
   return payload;
 }

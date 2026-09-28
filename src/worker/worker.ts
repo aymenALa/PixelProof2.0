@@ -1,5 +1,6 @@
 import { runPipeline } from '../core/run';
-import type { Ctx, StepSpec } from '../core/types';
+import { createReport } from '../core/report';
+import type { Ctx, Report, StepSpec } from '../core/types';
 import '../steps';
 
 interface RunMessage { readonly id: string; readonly file: Blob; readonly specs: readonly StepSpec[]; }
@@ -16,7 +17,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
   }
   const controller = new AbortController();
   controllers.set(message.id, controller);
-  const report: Record<string, unknown> = {};
+  const report: Report = createReport();
   const ctx: Ctx = { signal: controller.signal, report };
   try {
     const result = await runPipeline(message.file, message.specs, ctx);

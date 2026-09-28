@@ -1,5 +1,5 @@
 import { register } from '../core/registry';
-import type { Raster } from '../core/types';
+import type { Raster, Report } from '../core/types';
 
 type Color = { r: number; g: number; b: number };
 
@@ -10,7 +10,7 @@ function parseBackground(value: unknown): Color {
   return { r: Number.parseInt(expanded.slice(0, 2), 16), g: Number.parseInt(expanded.slice(2, 4), 16), b: Number.parseInt(expanded.slice(4, 6), 16) };
 }
 
-async function run(input: Raster, opts: { type?: unknown; quality?: unknown; background?: unknown }, report: Record<string, unknown>): Promise<{ kind: 'bytes'; blob: Blob }> {
+async function run(input: Raster, opts: { type?: unknown; quality?: unknown; background?: unknown }, report: Report): Promise<{ kind: 'bytes'; blob: Blob }> {
     const requested = typeof opts.type === 'string' ? opts.type : 'image/png';
     const isJpeg = requested.toLowerCase() === 'image/jpeg' || requested.toLowerCase() === 'image/jpg';
     let canvas = input.canvas;
@@ -26,7 +26,8 @@ async function run(input: Raster, opts: { type?: unknown; quality?: unknown; bac
     }
     const quality = typeof opts.quality === 'number' ? opts.quality : undefined;
     const blob = await canvas.convertToBlob(quality === undefined ? { type: requested } : { type: requested, quality });
-    if (blob.type !== requested) report.encodeFallback = { requested, actual: blob.type };
+    report.output.encode = { requested, actual: blob.type, width: canvas.width, height: canvas.height };
+    if (blob.type !== requested) report.output.encodeFallback = { requested, actual: blob.type };
     return { kind: 'bytes', blob };
 }
 

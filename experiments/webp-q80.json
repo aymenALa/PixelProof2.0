@@ -1,13 +1,13 @@
 [
-  { "type": "inspectMetadata" },
+  { "type": "inspectMetadata", "opts": { "target": "input" } },
   { "type": "decode" },
   { "type": "encode", "opts": { "type": "image/webp", "quality": 0.8 } },
   { "type": "decode" },
   { "type": "pixelDiff" },
-  { "type": "psnr", "opts": { "perChannel": true } },
-  { "type": "ssim", "opts": { "perChannel": true } },
+  { "type": "psnr", "opts": { "mode": "channel" } },
+  { "type": "ssim", "opts": { "mode": "channel" } },
   { "type": "dhash" },
   { "type": "phash" },
   { "type": "encode", "opts": { "type": "image/webp", "quality": 0.8 } },
-  { "type": "hash", "opts": { "label": "output" } }
+  { "type": "hash", "opts": { "target": "output" } }
 ]

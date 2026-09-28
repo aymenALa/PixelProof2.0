@@ -1,37 +1,49 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { InlineRunner } from '../core/runner';
-import type { Ctx, StepSpec } from '../core/types';
+import { createReport } from '../core/report';
+import type { Ctx, Report, StepSpec } from '../core/types';
 import { WorkerRunner } from '../worker/WorkerRunner';
+import { serializeJson } from '../core/report';
 import { deleteHistory, listHistory, saveHistory, type HistoryRecord } from './history';
 import './styles.css';
 
 const presets: Record<string, readonly StepSpec[]> = {
   'audit-png': [
     { type: 'decode' }, { type: 'resize', opts: { maxWidth: 2400 } }, { type: 'grayscale' },
-    { type: 'encode', opts: { type: 'image/png' } }, { type: 'hash', opts: { label: 'output' } },
+    { type: 'encode', opts: { type: 'image/png' } }, { type: 'hash', opts: { target: 'output' } },
   ],
   'jpeg-proof': [
     { type: 'decode' }, { type: 'resize', opts: { maxWidth: 2400 } },
-    { type: 'encode', opts: { type: 'image/jpeg', quality: 0.92, background: '#ffffff' } }, { type: 'hash', opts: { label: 'output' } },
+    { type: 'encode', opts: { type: 'image/jpeg', quality: 0.92, background: '#ffffff' } }, { type: 'hash', opts: { target: 'output' } },
+  ],
+  'invisible-repack': [
+    { type: 'hash', opts: { target: 'input' } }, { type: 'inspectMetadata', opts: { target: 'input' } },
+    { type: 'decode' }, { type: 'pixelDiff' }, { type: 'psnr', opts: { mode: 'channel' } },
+    { type: 'encode', opts: { type: 'image/png' } }, { type: 'hash', opts: { target: 'output' } },
+    { type: 'inspectMetadata', opts: { target: 'output' } },
   ],
   measure: [
-    { type: 'inspectMetadata' }, { type: 'decode' }, { type: 'encode', opts: { type: 'image/png' } }, { type: 'decode' },
-    { type: 'pixelDiff' }, { type: 'psnr', opts: { perChannel: true } }, { type: 'ssim', opts: { perChannel: true } },
-    { type: 'dhash' }, { type: 'phash' }, { type: 'hash', opts: { label: 'measured' } },
+    { type: 'hash', opts: { target: 'input' } }, { type: 'inspectMetadata', opts: { target: 'input' } }, { type: 'decode' },
+    { type: 'encode', opts: { type: 'image/png' } }, { type: 'hash', opts: { target: 'output' } }, { type: 'inspectMetadata', opts: { target: 'output' } }, { type: 'decode' },
+    { type: 'pixelDiff' }, { type: 'psnr', opts: { mode: 'channel' } }, { type: 'ssim', opts: { mode: 'channel' } },
+    { type: 'dhash' }, { type: 'phash' },
+    { type: 'encode', opts: { type: 'image/png' } },
   ],
 };
 
 function formatReportValue(value: unknown): string {
-  return typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value);
+  return typeof value === 'object' && value !== null ? serializeJson(value) : String(value);
 }
 
 export function App() {
   const [file, setFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [mode, setMode] = useState<'inline' | 'worker'>('worker');
-  const [preset, setPreset] = useState('audit-png');
-  const [specText, setSpecText] = useState(JSON.stringify(presets['audit-png'], null, 2));
-  const [report, setReport] = useState<Record<string, unknown> | null>(null);
+  const [preset, setPreset] = useState('invisible-repack');
+  const [specText, setSpecText] = useState(JSON.stringify(presets['invisible-repack'], null, 2));
+  const [report, setReport] = useState<Report | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [downloadName, setDownloadName] = useState('pixelproof-output');
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
@@ -47,6 +59,19 @@ export function App() {
     setSpecText(JSON.stringify(presets[value], null, 2));
   }
 
+  function handleDragOver(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setDragging(true);
+  }
+
+  function handleDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setDragging(false);
+    const dropped = event.dataTransfer.files[0];
+    if (dropped) setFile(dropped);
+  }
+
   async function run() {
     if (!file || running) return;
     let specs: StepSpec[];
@@ -59,10 +84,12 @@ export function App() {
     controllerRef.current = controller;
     setRunning(true); setError(null); setReport(null);
     try {
-      const nextReport: Record<string, unknown> = {};
+      const nextReport = createReport();
       const ctx: Ctx = { signal: controller.signal, report: nextReport };
       const result = await runner.run(file, specs, ctx);
       const nextUrl = URL.createObjectURL(result.blob);
+      const extension = result.blob.type === 'image/jpeg' ? 'jpg' : result.blob.type === 'image/webp' ? 'webp' : 'png';
+      setDownloadName(`pixelproof-output.${extension}`);
       setPreviewUrl((previous) => { if (previous) URL.revokeObjectURL(previous); return nextUrl; });
       setReport(nextReport);
       const historyRecord: HistoryRecord = { id: crypto.randomUUID(), createdAt: Date.now(), inputName: file.name, runner: mode, pipeline: specs, bytesIn: file.size, bytesOut: result.blob.size, report: nextReport };
@@ -76,8 +103,8 @@ export function App() {
 
   function exportHistory() {
     const columns = ['id', 'createdAt', 'inputName', 'runner', 'bytesIn', 'bytesOut', 'report'];
-    const cell = (value: unknown) => { const text = typeof value === 'string' ? value : JSON.stringify(value); return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text; };
-    const csv = [columns.join(','), ...history.map((run) => [run.id, run.createdAt, run.inputName, run.runner, run.bytesIn, run.bytesOut, JSON.stringify(run.report)].map(cell).join(','))].join('\n');
+    const cell = (value: unknown) => { const text = typeof value === 'string' ? value : serializeJson(value); return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text; };
+    const csv = [columns.join(','), ...history.map((run) => [run.id, run.createdAt, run.inputName, run.runner, run.bytesIn, run.bytesOut, serializeJson(run.report)].map(cell).join(','))].join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'pixelproof-history.csv'; anchor.click(); URL.revokeObjectURL(url);
   }
@@ -89,7 +116,7 @@ export function App() {
     <h1>Measure the pipeline.</h1>
     <p className="lede">Inline and Worker execution share the same declared steps. Files stay in this browser.</p>
     <section className="card controls-card">
-      <label className="file-input">{file ? file.name : 'Choose an image'}<input type="file" accept="image/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
+      <label className={`file-input${dragging ? ' dragging' : ''}`} onDragEnter={handleDragOver} onDragOver={handleDragOver} onDragLeave={() => setDragging(false)} onDrop={handleDrop}>{file ? file.name : 'Drop an image here or choose one'}<input type="file" accept="image/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
       <div className="grid">
         <label>Runner<select value={mode} onChange={(event) => setMode(event.target.value as 'inline' | 'worker')}><option value="worker">Worker</option><option value="inline">Inline</option></select></label>
         <label>Preset<select value={preset} onChange={(event) => choosePreset(event.target.value)}>{Object.keys(presets).map((key) => <option key={key} value={key}>{key}</option>)}</select></label>
@@ -98,8 +125,8 @@ export function App() {
       <div className="actions"><button disabled={!file || running} onClick={() => void run()}>{running ? 'Running…' : 'Run pipeline'}</button><button className="secondary" disabled={!running} onClick={cancel}>Cancel</button></div>
     </section>
     {error && <p className="error">{error}</p>}
-    {previewUrl && <section className="card"><h2>Output preview</h2><img className="preview" src={previewUrl} alt="Processed output" /></section>}
-    {report && <section className="card"><h2>Report</h2><table><tbody>{Object.entries(report).map(([key, value]) => <tr key={key}><th>{key}</th><td>{formatReportValue(value)}</td></tr>)}</tbody></table></section>}
+    {previewUrl && <section className="card"><h2>Output preview</h2><img className="preview" src={previewUrl} alt="Processed output" /><a className="download" href={previewUrl} download={downloadName}>Download image</a></section>}
+    {report && <section className="card report"><h2>Report</h2><table><tbody>{Object.entries(report).map(([key, value]) => <tr key={key}><th>{key}</th><td>{formatReportValue(value)}</td></tr>)}</tbody></table></section>}
     <section className="card history"><div className="history-heading"><h2>Run history</h2><div><label>Sort<select aria-label="Sort history" value={historySort} onChange={(event) => setHistorySort(event.target.value as typeof historySort)}><option value="createdAt">Newest</option><option value="inputName">Input</option><option value="runner">Runner</option></select></label><button className="secondary" disabled={history.length === 0} onClick={exportHistory}>Export CSV</button></div></div><table><thead><tr><th>When</th><th>Input</th><th>Runner</th><th>Bytes</th><th>Actions</th></tr></thead><tbody>{sortedHistory.map((runRecord) => <tr key={runRecord.id}><td>{new Date(runRecord.createdAt).toLocaleString()}</td><td>{runRecord.inputName}</td><td>{runRecord.runner}</td><td>{runRecord.bytesIn} → {runRecord.bytesOut}</td><td><button className="secondary delete-run" onClick={() => { void deleteHistory(runRecord.id).then(() => setHistory((previous) => previous.filter((item) => item.id !== runRecord.id))); }}>Delete</button></td></tr>)}</tbody></table>{history.length === 0 && <p className="empty-history">No runs saved yet.</p>}</section>
   </main>;
 }

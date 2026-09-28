@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+// @ts-expect-error Vitest executes this fixture read in Node; the app itself has no Node dependency.
+import { readFileSync } from 'node:fs';
 import { dhash, hamming, phash, pixelDiff, psnr, psnrValues, ssim, ssimValues, type ImageDataLike } from './measurement-utils';
 import { scanMetadata } from './inspectMetadata';
 
@@ -9,9 +11,9 @@ describe('measurement helpers', () => {
     const original = image([10, 20, 30, 255, 40, 50, 60, 255], 2);
     expect(pixelDiff(original, original)).toEqual({ maxAbsDiff: 0, changedPixels: 0, changedPercent: 0 });
     expect(psnr(original, original).luma).toBe(Infinity);
-    expect(psnr(original, original, true).channels).toEqual({ r: Infinity, g: Infinity, b: Infinity });
+    expect(psnr(original, original, 'channel').channels).toEqual({ r: Infinity, g: Infinity, b: Infinity });
     expect(ssim(original, original).luma).toBe(1);
-    expect(ssim(original, original, true).channels).toEqual({ r: 1, g: 1, b: 1 });
+    expect(ssim(original, original, 'channel').channels).toEqual({ r: 1, g: 1, b: 1 });
     expect(dhash(original)).toBe(dhash(original));
     expect(phash(original)).toBe(phash(original));
   });
@@ -28,6 +30,17 @@ describe('measurement helpers', () => {
     const changed = image([1, 0, 0, 255, 0, 0, 0, 255], 2);
     expect(pixelDiff(original, changed)).toEqual({ maxAbsDiff: 1, changedPixels: 1, changedPercent: 50 });
     expect(psnrValues([0, 0], [0.2126, 0])).toBeCloseTo(10 * Math.log10((255 ** 2) / (0.2126 ** 2 / 2)), 12);
+  });
+
+  it('channel mode detects RGB changes that luma mode can hide after grayscale', () => {
+    const color = image([255, 0, 0, 255, 0, 0, 255, 255], 2);
+    const grayscale = image([54, 54, 54, 255, 18, 18, 18, 255], 2);
+    const channelPsnr = psnr(color, grayscale, 'channel');
+    const channelSsim = ssim(color, grayscale, 'channel');
+    expect(Number.isFinite(channelPsnr.channels?.r)).toBe(true);
+    expect(Number.isFinite(channelPsnr.channels?.b)).toBe(true);
+    expect(channelSsim.channels?.r).toBeLessThan(1);
+    expect(channelSsim.channels?.b).toBeLessThan(1);
   });
 
   it('rejects pixel comparisons with unequal dimensions', () => {
@@ -49,5 +62,13 @@ describe('measurement helpers', () => {
     expect(scanMetadata(png).png.iTXt).toBe(true);
     const webp = new Uint8Array([82, 73, 70, 70, 0, 0, 0, 0, 87, 69, 66, 80, 69, 88, 73, 70, 0, 0, 0, 0]);
     expect(scanMetadata(webp).webp.EXIF).toBe(true);
+  });
+
+  it('detects APP1 metadata in the real EXIF/GPS JPEG fixture', () => {
+    const fixture = new Uint8Array(readFileSync(new URL('../../tests/fixtures/exif-orientation-gps.jpg', import.meta.url)));
+    const metadata = scanMetadata(fixture).jpeg;
+    expect(metadata.APP1).toBe(true);
+    expect(metadata.gps?.GPSLatitude).toBeCloseTo(40.7128, 6);
+    expect(metadata.gps?.GPSLongitude).toBeCloseTo(-74.006, 6);
   });
 });

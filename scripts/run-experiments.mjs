@@ -49,11 +49,12 @@ try {
       const inputHash = Array.from(new Uint8Array(inputDigest), (byte) => byte.toString(16).padStart(2, '0')).join('');
       try {
         const result = await new api.InlineRunner().run(input, specs, { signal: new AbortController().signal, report });
-        const pixel = report.pixelDiff ?? {};
-        const psnr = report.psnr ?? {};
-        const ssim = report.ssim ?? {};
-        const outputHash = report['sha256:output'];
-        return { ok: true, deterministic: { sha_changed: outputHash !== inputHash, phash_dist: report.phash?.distance ?? '', dhash_dist: report.dhash?.distance ?? '', max_diff: pixel.maxAbsDiff ?? '', pct_changed: pixel.changedPercent ?? '', psnr: psnr.luma ?? '', ssim: ssim.luma ?? '', bytes_out: result.blob.size, raster_bytes: report.rasterBytes ?? {}, user_agent: report.userAgent ?? '' }, ms: Object.values(report.timings ?? {}).reduce((sum, value) => sum + Number(value), 0), bytes_in: input.size };
+        const comparison = report.comparison ?? {};
+        const pixel = comparison.pixelDiff ?? {};
+        const psnr = comparison.psnr ?? {};
+        const ssim = comparison.ssim ?? {};
+        const outputHash = report.output?.sha256;
+        return { ok: true, deterministic: { sha_changed: outputHash !== inputHash, phash_dist: comparison.phash?.distance ?? '', dhash_dist: comparison.dhash?.distance ?? '', max_diff: pixel.maxAbsDiff ?? '', pct_changed: pixel.changedPercent ?? '', psnr: psnr.luma ?? '', ssim: ssim.luma ?? '', bytes_out: result.blob.size, raster_bytes: report.rasterBytes ?? {}, user_agent: report.userAgent ?? '' }, ms: Object.values(report.timings ?? {}).reduce((sum, value) => sum + Number(value), 0), bytes_in: input.size };
       } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error), bytes_in: input.size, user_agent: report.userAgent ?? '' }; }
     }, { bytes, specs: experiment.specs }));
     const first = results[0];

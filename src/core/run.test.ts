@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { create, clearRegistryForTests, register } from './registry';
+import { createReport } from './report';
 import { runPipeline } from './run';
 import type { Ctx, Payload, Raster, Step } from './types';
 
 const passthrough = (name: string, input: Step['in'], output: Step['out'], run: Step['run']): Step => ({ name, in: input, out: output, run });
-const ctx = (): Ctx => ({ signal: new AbortController().signal, report: {} });
+const ctx = (): Ctx => ({ signal: new AbortController().signal, report: createReport() });
 const fakeCanvas = (width: number, height: number): OffscreenCanvas => ({
   width,
   height,
@@ -32,14 +33,14 @@ describe('core pipeline runner', () => {
     const controller = new AbortController();
     register('first', () => passthrough('first', 'bytes', 'bytes', async (input) => { controller.abort(); return input; }));
     register('second', () => passthrough('second', 'bytes', 'bytes', vi.fn(async (input) => input)));
-    await expect(runPipeline(new Blob(['x']), [{ type: 'first' }, { type: 'second' }], { signal: controller.signal, report: {} })).rejects.toThrow(/aborted/);
+    await expect(runPipeline(new Blob(['x']), [{ type: 'first' }, { type: 'second' }], { signal: controller.signal, report: createReport() })).rejects.toThrow(/aborted/);
   });
 
   it('records timings, raster memory, original pixels, and user agent', async () => {
     const canvas = fakeCanvas(3, 2);
     register('raster', () => passthrough('raster', 'bytes', 'raster', async () => ({ kind: 'raster', canvas } as Raster)));
     register('bytes', () => passthrough('bytes', 'raster', 'bytes', async () => ({ kind: 'bytes', blob: new Blob(['done']) })));
-    const report: Record<string, unknown> = {};
+    const report = createReport();
     const pipelineContext = { signal: new AbortController().signal, report };
     const result = await runPipeline(new Blob(['x']), [{ type: 'raster' }, { type: 'bytes' }], pipelineContext);
     expect(result.kind).toBe('bytes');

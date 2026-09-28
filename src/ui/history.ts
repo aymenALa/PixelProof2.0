@@ -1,4 +1,5 @@
-import type { StepSpec } from '../core/types';
+import type { Report, StepSpec } from '../core/types';
+import { serializeJson } from '../core/report';
 
 export interface HistoryRecord {
   readonly id: string;
@@ -8,7 +9,7 @@ export interface HistoryRecord {
   readonly pipeline: readonly StepSpec[];
   readonly bytesIn: number;
   readonly bytesOut: number;
-  readonly report: Record<string, unknown>;
+  readonly report: Report;
 }
 
 const databaseName = 'pixelproof-local';
@@ -31,7 +32,7 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 function jsonOnly<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+  return JSON.parse(serializeJson(value)) as T;
 }
 
 export async function saveHistory(record: HistoryRecord): Promise<void> {
