@@ -3,32 +3,16 @@ import { InlineRunner } from '../core/runner';
 import { createReport } from '../core/report';
 import type { Ctx, Report, StepSpec } from '../core/types';
 import { WorkerRunner } from '../worker/WorkerRunner';
+import { buildAuditPipeline } from '../core/auditPipeline';
 import { serializeJson } from '../core/report';
 import { deleteHistory, listHistory, saveHistory, type HistoryRecord } from './history';
 import './styles.css';
 
 const presets: Record<string, readonly StepSpec[]> = {
-  'audit-png': [
-    { type: 'decode' }, { type: 'resize', opts: { maxWidth: 2400 } }, { type: 'grayscale' },
-    { type: 'encode', opts: { type: 'image/png' } }, { type: 'hash', opts: { target: 'output' } },
-  ],
-  'jpeg-proof': [
-    { type: 'decode' }, { type: 'resize', opts: { maxWidth: 2400 } },
-    { type: 'encode', opts: { type: 'image/jpeg', quality: 0.92, background: '#ffffff' } }, { type: 'hash', opts: { target: 'output' } },
-  ],
-  'invisible-repack': [
-    { type: 'hash', opts: { target: 'input' } }, { type: 'inspectMetadata', opts: { target: 'input' } },
-    { type: 'decode' }, { type: 'pixelDiff' }, { type: 'psnr', opts: { mode: 'channel' } },
-    { type: 'encode', opts: { type: 'image/png' } }, { type: 'hash', opts: { target: 'output' } },
-    { type: 'inspectMetadata', opts: { target: 'output' } },
-  ],
-  measure: [
-    { type: 'hash', opts: { target: 'input' } }, { type: 'inspectMetadata', opts: { target: 'input' } }, { type: 'decode' },
-    { type: 'encode', opts: { type: 'image/png' } }, { type: 'hash', opts: { target: 'output' } }, { type: 'inspectMetadata', opts: { target: 'output' } }, { type: 'decode' },
-    { type: 'pixelDiff' }, { type: 'psnr', opts: { mode: 'channel' } }, { type: 'ssim', opts: { mode: 'channel' } },
-    { type: 'dhash' }, { type: 'phash' },
-    { type: 'encode', opts: { type: 'image/png' } },
-  ],
+  'no-transform-png': buildAuditPipeline({ transform: 'none', targetType: 'image/png' }),
+  'no-transform-jpeg': buildAuditPipeline({ transform: 'none', targetType: 'image/jpeg', quality: 0.92 }),
+  'grayscale-png': buildAuditPipeline({ transform: 'grayscale', targetType: 'image/png' }),
+  'resize-2400-png': buildAuditPipeline({ transform: { resize: { maxWidth: 2400 } }, targetType: 'image/png' }),
 };
 
 function formatReportValue(value: unknown): string {
@@ -39,8 +23,8 @@ export function App() {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [mode, setMode] = useState<'inline' | 'worker'>('worker');
-  const [preset, setPreset] = useState('invisible-repack');
-  const [specText, setSpecText] = useState(JSON.stringify(presets['invisible-repack'], null, 2));
+  const [preset, setPreset] = useState('no-transform-png');
+  const [specText, setSpecText] = useState(JSON.stringify(presets['no-transform-png'], null, 2));
   const [report, setReport] = useState<Report | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [downloadName, setDownloadName] = useState('pixelproof-output');

@@ -1,12 +1,11 @@
 import { readFile, readdir, writeFile } from 'node:fs/promises';
-import { join, basename, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { get } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const experimentsDir = join(root, 'experiments');
 const fixturesDir = join(root, 'tests', 'fixtures');
 const runsArg = process.argv.find((arg) => arg.startsWith('--runs='));
 const outputArg = process.argv.find((arg) => arg.startsWith('--out='));
@@ -34,16 +33,21 @@ try {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${port}/`);
-  const experimentFiles = (await readdir(experimentsDir)).filter((name) => name.endsWith('.json')).sort();
   const fixtureFiles = (await readdir(fixturesDir)).filter((name) => !name.endsWith('.md')).sort();
-  const experiments = await Promise.all(experimentFiles.map(async (name) => ({ name: basename(name, '.json'), specs: JSON.parse(await readFile(join(experimentsDir, name), 'utf8')) })));
+  const experiments = [
+    { name: 'no-transform-png', opts: { transform: 'none', targetType: 'image/png' } },
+    { name: 'no-transform-jpeg', opts: { transform: 'none', targetType: 'image/jpeg', quality: 0.92 } },
+    { name: 'grayscale-png', opts: { transform: 'grayscale', targetType: 'image/png' } },
+    { name: 'resize-2400-png', opts: { transform: { resize: { maxWidth: 2400 } }, targetType: 'image/png' } },
+  ];
   const rows = [];
   for (const fixture of fixtureFiles) for (const experiment of experiments) {
     const bytes = Array.from(await readFile(join(fixturesDir, fixture)));
     const results = [];
-    for (let run = 0; run < runs; run += 1) results.push(await page.evaluate(async ({ bytes: inputBytes, specs }) => {
+    for (let run = 0; run < runs; run += 1) results.push(await page.evaluate(async ({ bytes: inputBytes, opts }) => {
       const api = globalThis.__pixelproof;
-      const report = {};
+      const report = { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' };
+      const specs = api.buildAuditPipeline(opts);
       const input = new Blob([new Uint8Array(inputBytes)]);
       const inputDigest = await crypto.subtle.digest('SHA-256', await input.arrayBuffer());
       const inputHash = Array.from(new Uint8Array(inputDigest), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -53,10 +57,12 @@ try {
         const pixel = comparison.pixelDiff ?? {};
         const psnr = comparison.psnr ?? {};
         const ssim = comparison.ssim ?? {};
-        const outputHash = report.output?.sha256;
+        const outputDigest = await crypto.subtle.digest('SHA-256', await result.blob.arrayBuffer());
+        const outputBytesHash = Array.from(new Uint8Array(outputDigest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+        const outputHash = report.output?.sha256 ?? outputBytesHash;
         return { ok: true, deterministic: { sha_changed: outputHash !== inputHash, phash_dist: comparison.phash?.distance ?? '', dhash_dist: comparison.dhash?.distance ?? '', max_diff: pixel.maxAbsDiff ?? '', pct_changed: pixel.changedPercent ?? '', psnr: psnr.luma ?? '', ssim: ssim.luma ?? '', bytes_out: result.blob.size, raster_bytes: report.rasterBytes ?? {}, user_agent: report.userAgent ?? '' }, ms: Object.values(report.timings ?? {}).reduce((sum, value) => sum + Number(value), 0), bytes_in: input.size };
       } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error), bytes_in: input.size, user_agent: report.userAgent ?? '' }; }
-    }, { bytes, specs: experiment.specs }));
+    }, { bytes, opts: experiment.opts }));
     const first = results[0];
     const stable = JSON.stringify(results.map((result) => result.ok ? result.deterministic : { error: result.error }));
     if (new Set(results.map((result) => result.ok ? JSON.stringify(result.deterministic) : JSON.stringify({ error: result.error }))).size !== 1) throw new Error(`Nondeterministic result for ${fixture} × ${experiment.name}: ${stable}`);

@@ -52,20 +52,11 @@ test.describe('browser image steps', () => {
     expect(hashes[0]).toBe(hashes[1]);
   });
 
-  test('invisible-repack changes bytes, preserves pixels, and removes metadata', async ({ page }) => {
+  test('no-transform-png changes bytes, preserves pixels, and removes metadata', async ({ page }) => {
     const result = await page.evaluate(async ({ bytes }) => {
-      const api = (globalThis as typeof globalThis & { __pixelproof: { InlineRunner: new () => { run(input: Blob, specs: unknown[], ctx: unknown): Promise<{ blob: Blob }> } } }).__pixelproof;
+      const api = (globalThis as typeof globalThis & { __pixelproof: { InlineRunner: new () => { run(input: Blob, specs: unknown[], ctx: unknown): Promise<{ blob: Blob }> }; buildAuditPipeline: (opts: unknown) => unknown[] } }).__pixelproof;
       const report = { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' };
-      const specs = [
-        { type: 'hash', opts: { target: 'input' } },
-        { type: 'inspectMetadata', opts: { target: 'input' } },
-        { type: 'decode' },
-        { type: 'pixelDiff' },
-        { type: 'psnr', opts: { mode: 'channel' } },
-        { type: 'encode', opts: { type: 'image/png' } },
-        { type: 'hash', opts: { target: 'output' } },
-        { type: 'inspectMetadata', opts: { target: 'output' } },
-      ];
+      const specs = api.buildAuditPipeline({ transform: 'none', targetType: 'image/png' });
       const output = await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' }), specs, { signal: new AbortController().signal, report });
       const serialized = JSON.parse(JSON.stringify(report, (_key, value) => typeof value === 'number' && !Number.isFinite(value) ? String(value) : value));
       return { report: serialized, outputBytes: output.blob.size };
@@ -82,6 +73,31 @@ test.describe('browser image steps', () => {
     expect(result.report.output.metadata.jpeg.gps).toBeUndefined();
     expect(result.report.output.bytes).not.toBe(result.report.input.bytes);
   });
+
+  test('grayscale metrics detect changes on the colorful 447x447 fixture', async ({ page }) => {
+    const comparison = await page.evaluate(async ({ bytes }) => {
+      const api = (globalThis as typeof globalThis & { __pixelproof: { InlineRunner: new () => { run(input: Blob, specs: unknown[], ctx: unknown): Promise<unknown> } } }).__pixelproof;
+      const report = { input: {}, output: {}, comparison: {}, timings: {}, rasterBytes: {}, userAgent: '' };
+      await new api.InlineRunner().run(new Blob([new Uint8Array(bytes)], { type: 'image/png' }), [
+        { type: 'decode' },
+        { type: 'grayscale' },
+        { type: 'pixelDiff' },
+        { type: 'psnr', opts: { mode: 'channel' } },
+        { type: 'ssim', opts: { mode: 'channel' } },
+        { type: 'phash' },
+        { type: 'dhash' },
+        { type: 'encode', opts: { type: 'image/png' } },
+      ], { signal: new AbortController().signal, report });
+      return report.comparison;
+    }, { bytes: fixture('color-447.png') });
+    expect(comparison.ssim.luma).toBeLessThan(1);
+    expect(comparison.ssim.channels.r).toBeLessThan(1);
+    expect(comparison.ssim.channels.g).toBeLessThan(1);
+    expect(comparison.ssim.channels.b).toBeLessThan(1);
+    expect(comparison.phash.distance).toBeGreaterThan(0);
+    expect(comparison.dhash.distance).toBeGreaterThan(0);
+  });
+
 
   test('WorkerRunner executes the same declared pipeline and supports abort', async ({ page }) => {
     const result = await page.evaluate(async ({ bytes }) => {
@@ -103,7 +119,7 @@ test.describe('browser image steps', () => {
   test('UI exposes worker toggle, run, cancel, preview, and report', async ({ page }) => {
     await page.locator('input[type="file"]').setInputFiles(join(process.cwd(), 'tests', 'fixtures', 'transparent.png'));
     await expect(page.getByRole('combobox', { name: 'Runner' })).toHaveValue('worker');
-    await expect(page.getByRole('combobox', { name: 'Preset' })).toHaveValue('invisible-repack');
+    await expect(page.getByRole('combobox', { name: 'Preset' })).toHaveValue('no-transform-png');
     await page.getByRole('button', { name: 'Run pipeline' }).click();
     await expect(page.getByRole('img', { name: 'Processed output' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Download image' })).toHaveAttribute('download', 'pixelproof-output.png');

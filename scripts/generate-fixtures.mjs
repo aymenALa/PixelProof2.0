@@ -62,6 +62,21 @@ function exifPayload() {
 
 const transparent = png(2, 1, Buffer.from([255, 0, 0, 0, 0, 0, 255, 255]));
 const rgb2x2 = png(2, 2, Buffer.from([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]));
+const colorful = Buffer.alloc(447 * 447 * 4);
+for (let y = 0; y < 447; y += 1) for (let x = 0; x < 447; x += 1) {
+  const offset = (y * 447 + x) * 4;
+  colorful[offset] = (x * 13 + y * 7) & 255;
+  colorful[offset + 1] = (x * 3 + y * 29 + 97) & 255;
+  colorful[offset + 2] = (x * 31 + y * 11 + 173) & 255;
+  colorful[offset + 3] = 255;
+}
+// Force one dHash neighbor comparison to flip after luma rounding: both values round to 101.
+const sampleY = 27;
+const firstSampleX = 24;
+const secondSampleX = 74;
+colorful.set([100, 101, 100, 255], (sampleY * 447 + firstSampleX) * 4);
+colorful.set([100, 100, 107, 255], (sampleY * 447 + secondSampleX) * 4);
+const colorful447 = png(447, 447, colorful);
 const large = png(4096, 2, Buffer.alloc(4096 * 2 * 4, 80));
 
 async function generate() {
@@ -84,6 +99,7 @@ async function generate() {
   writeFileSync(new URL('exif-orientation-gps.jpg', fixtureDir), jpeg);
   writeFileSync(new URL('transparent.png', fixtureDir), transparent);
   writeFileSync(new URL('rgb-2x2.png', fixtureDir), rgb2x2);
+  writeFileSync(new URL('color-447.png', fixtureDir), colorful447);
   writeFileSync(new URL('corrupt.bin', fixtureDir), Buffer.from('not-a-real-image'));
   writeFileSync(new URL('png-renamed.jpg', fixtureDir), transparent);
   writeFileSync(new URL('large-dimension.png', fixtureDir), large);

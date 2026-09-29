@@ -1,6 +1,6 @@
 # Experiment harness
 
-Run every fixed pipeline over every fixture and write one CSV row per fixture/pipeline pair:
+Run the four parameterized audit pipelines built by `buildAuditPipeline` over every fixture and write one CSV row per fixture/pipeline pair:
 
 ```text
 npm run experiments -- --runs=3 --out=experiments.csv
