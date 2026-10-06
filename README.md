@@ -1,491 +1,1306 @@
 # PixelProof Lab
 
-PixelProof Lab is a self-contained browser laboratory for measuring what happens to an image when it is decoded, transformed, and encoded again.
+> ### Image Processing, Turned Into Evidence.
+>
+> A self-contained browser laboratory for measuring what actually changes when an image is decoded, transformed, and encoded again.
+>
+> **Conceived from Stage 0 and developed as a standalone system.**
+>
+> No application backend. No database server. No dependency on another repository.
 
-It is designed around a simple question:
+---
 
-> When an image is processed, did the bytes, metadata, pixels, structure, or perceived appearance change—and by how much?
+# 🧭 Roadmap
 
-The project answers that question locally in the browser. The selected file is processed without an application backend, without a database server, and without a dependency on another repository. The application can run a declared pipeline inline or inside a Web Worker, produces a structured audit report, stores run history in IndexedDB, and exposes deterministic experiment tooling for repeatable comparisons.
+PixelProof Lab was developed as a progression from a simple research question into a complete measurement instrument.
 
-## Why this project exists
+```mermaid
+flowchart LR
 
-Image conversion tools usually optimize for producing an output file. PixelProof Lab adds the missing measurement layer.
+    S0["🟣 STAGE 0<br/><b>THE IDEA</b><br/>What actually changed?"]
 
-Two files may look similar while having different bytes, metadata, dimensions, compression characteristics, or color-channel behavior. Conversely, an operation that changes many pixels may preserve the important visual structure of the image. PixelProof therefore does not rely on one metric or on visual inspection alone. It records several complementary forms of evidence:
+    S1["🔵 STAGE 1<br/><b>FOUNDATION</b><br/>Domain contracts"]
 
-- cryptographic identity of the input and output bytes;
-- container and metadata markers for JPEG, PNG, and WebP;
-- exact pixel differences when the raster dimensions are compatible;
-- PSNR and SSIM, in luma or per-channel mode;
-- perceptual dHash and pHash distances;
-- output dimensions, requested versus actual encoder type, and fallbacks;
-- per-step duration and raster memory size;
-- the browser user agent used for the run;
-- the selected runner and complete pipeline specification in local history.
+    S2["🟢 STAGE 2<br/><b>ENGINE</b><br/>Pipeline + Registry"]
 
-The result is not merely an image converter. It is an evidence-producing instrument for understanding image transformations.
+    S3["🟡 STAGE 3<br/><b>IMAGE PROCESSING</b><br/>Decode → Transform → Encode"]
 
-## Added value
+    S4["🟠 STAGE 4<br/><b>MEASUREMENT</b><br/>Hashes · Metadata · Quality"]
 
-### 1. A complete audit trail instead of a single output
+    S5["🔴 STAGE 5<br/><b>ISOLATION</b><br/>Workers · Cancellation · Offline"]
 
-Every audit run produces a report with separate `input`, `output`, `comparison`, `timings`, and `rasterBytes` sections. This makes it possible to distinguish:
+    S6["🟤 STAGE 6<br/><b>VERIFICATION</b><br/>Tests · History · Reports"]
 
-- byte changes from pixel changes;
-- metadata changes from visual changes;
-- lossy encoding from resizing or grayscale transformation;
-- requested encoder behavior from the browser's actual supported output type;
-- processing cost from image-quality effects.
+    S7["⚫ STAGE 7<br/><b>EXPERIMENTS</b><br/>Fixtures · Repetition · CSV"]
 
-### 2. A declared and validated pipeline model
+    RESULT["🏁 RESULT<br/><b>PIXELPROOF LAB</b><br/>A measurable image-processing instrument"]
 
-Pipelines are represented as JSON-like `StepSpec` values. Every step declares its input and output stage:
+    S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> RESULT
+```
+
+### Progress at a glance
+
+| Stage    | Focus                  | Result                               |
+| -------- | ---------------------- | ------------------------------------ |
+| 🟣 **0** | Original concept       | Defined the measurement problem      |
+| 🔵 **1** | Domain foundation      | Typed image-processing model         |
+| 🟢 **2** | Execution architecture | Validated extensible pipeline        |
+| 🟡 **3** | Processing primitives  | Real browser image transformations   |
+| 🟠 **4** | Evidence & measurement | Forensic + perceptual audit layer    |
+| 🔴 **5** | Execution isolation    | Worker execution + cancellation      |
+| 🟤 **6** | Verification           | E2E guarantees + local evidence      |
+| ⚫ **7**  | Reproducibility        | Repeatable experiments + CSV results |
+
+---
+
+# 💡 Stage 0 — The Original Question
+
+Everything starts with one question:
+
+> **When an image is processed, did the bytes, metadata, pixels, structure, or perceived appearance change — and by how much?**
+
+Typical image-processing software focuses on:
 
 ```text
-bytes -> raster -> bytes
+INPUT
+  ↓
+PROCESS
+  ↓
+OUTPUT
 ```
 
-The runner validates the complete wiring before executing the first step. Unknown steps, duplicate registrations, invalid options, incorrect stage transitions, and pipelines that do not end in bytes are rejected explicitly.
-
-This turns an image operation into a reproducible specification instead of hidden control flow.
-
-### 3. Local-first privacy and operational independence
-
-The application processes files in the browser. The network tests verify that processing creates no external HTTP requests, works while the browser is offline, and does not contain common network-capable processing APIs such as `fetch`, `XMLHttpRequest`, `WebSocket`, `FormData`, `EventSource`, or `sendBeacon`.
-
-The production preview also sends a restrictive Content Security Policy:
+PixelProof adds the missing layer:
 
 ```text
-default-src 'self'; connect-src 'none'; worker-src 'self' blob:; img-src 'self' blob: data:
+INPUT
+  ↓
+PROCESS
+  ↓
+OUTPUT
+  ↓
+          WHAT CHANGED?
+          HOW MUCH?
+          WHERE?
+          WHY?
+          WAS IT REPRODUCIBLE?
 ```
 
-This makes the privacy property testable and repeatable rather than a marketing claim.
+This became the foundation for the entire architecture.
 
-### 4. Performance isolation without changing the processing model
+---
 
-`InlineRunner` and `WorkerRunner` share the same `runPipeline` implementation and the same step registry. Worker mode moves execution away from the main UI thread while preserving the same declared pipeline contract and report shape.
+# 🧠 The Core Concept
 
-The worker protocol supports:
+PixelProof does not treat the output image as the final answer.
 
-- unique run identifiers;
-- result and error messages;
-- cancellation through `AbortController`;
-- cleanup of completed controllers;
-- report transfer back to the UI.
+It treats the output as **evidence**.
 
-The end-to-end suite also processes a 12-megapixel raster through `WorkerRunner`.
+```mermaid
+flowchart TB
 
-### 5. Reproducible experimentation
+    INPUT["📥 INPUT IMAGE"]
 
-The experiment harness runs four parameterized pipelines over every local fixture, repeats each run, and rejects nondeterministic result fields. It records image-quality metrics, byte sizes, raster memory, and timing data in CSV form.
+    ID["🔐 BYTE IDENTITY<br/>SHA-256"]
 
-Timing is intentionally treated as a measurement rather than a deterministic identity. Quality and output fields must remain stable across repetitions.
+    META["🧬 CONTAINER / METADATA<br/>JPEG · PNG · WebP"]
 
-## Project status and scope
+    PIX["🔬 PIXEL EVIDENCE<br/>Exact differences"]
 
-This is a focused local laboratory, not a hosted image service. Its current scope is:
+    QUALITY["📊 QUALITY EVIDENCE<br/>PSNR · SSIM"]
 
-- browser-based image input and output;
-- JPEG, PNG, and WebP signature validation;
-- browser-supported decoding and encoding through `createImageBitmap`, `OffscreenCanvas`, and `convertToBlob`;
-- a plugin-like registry of processing steps;
-- local reports and local run history;
-- testable offline and same-origin operation.
+    PERCEPTUAL["👁 PERCEPTUAL EVIDENCE<br/>dHash · pHash"]
 
-The application deliberately does not introduce a remote API, cloud storage, server-side image library, or external repository as part of its runtime design. Browser codec support still determines which output formats are actually available; the report records an encoder fallback when the browser returns a different type than requested.
+    EXEC["⚙️ EXECUTION EVIDENCE<br/>Time · Raster memory"]
 
-## Repository structure
+    REPRO["♻️ REPRODUCIBILITY<br/>Pipeline · Runner · Fixtures"]
+
+    REPORT["📋 STRUCTURED AUDIT REPORT"]
+
+    INPUT --> ID
+    INPUT --> META
+    INPUT --> PIX
+    INPUT --> QUALITY
+    INPUT --> PERCEPTUAL
+    INPUT --> EXEC
+    INPUT --> REPRO
+
+    ID --> REPORT
+    META --> REPORT
+    PIX --> REPORT
+    QUALITY --> REPORT
+    PERCEPTUAL --> REPORT
+    EXEC --> REPORT
+    REPRO --> REPORT
+```
+
+The result is not merely an image converter.
+
+**It is an evidence-producing laboratory for image transformations.**
+
+---
+
+# 🏗️ Stage 1 — Build the Foundation
+
+The first engineering problem was defining what an image-processing pipeline actually operates on.
+
+PixelProof explicitly separates:
 
 ```text
-.
-├── index.html                     Browser entry document
-├── package.json                   Scripts and pinned direct dependencies
-├── vite.config.ts                 Vite build and production CSP configuration
-├── playwright.config.ts           Production-preview E2E configuration
-├── tsconfig*.json                 TypeScript project configuration
-├── src/
-│   ├── main.tsx                   React application bootstrap
-│   ├── browser-entry.ts           Browser-testable public API
-│   ├── core/
-│   │   ├── types.ts               Payload, stage, step, context, and report contracts
-│   │   ├── registry.ts             Step registration and factory lookup
-│   │   ├── report.ts               Report creation, target validation, JSON serialization
-│   │   ├── run.ts                  Pipeline validation, execution, cancellation, telemetry
-│   │   ├── runner.ts               Runner abstraction and inline implementation
-│   │   └── auditPipeline.ts         Preset pipeline construction
-│   ├── steps/
-│   │   ├── index.ts                 Built-in step registration side effects
-│   │   ├── decode.ts                Magic-byte validation and raster decoding
-│   │   ├── resize.ts                Aspect-preserving maximum-width resize
-│   │   ├── grayscale.ts             Luma-based grayscale transformation
-│   │   ├── encode.ts                PNG/JPEG/WebP encoding and JPEG flattening
-│   │   ├── hash.ts                  SHA-256 input/output identity
-│   │   ├── inspectMetadata.ts        JPEG/PNG/WebP container metadata inspection
-│   │   ├── pixelDiff.ts              Exact raster difference metrics
-│   │   ├── psnr.ts                  Peak signal-to-noise ratio step
-│   │   ├── ssim.ts                  Structural similarity step
-│   │   ├── dhash.ts                 Difference hash comparison
-│   │   ├── phash.ts                 DCT-based perceptual hash comparison
-│   │   └── measurement-utils.ts     Shared raster readers and metric algorithms
-│   ├── worker/
-│   │   ├── WorkerRunner.ts           Main-thread worker adapter
-│   │   └── worker.ts                 Worker message loop and cancellation map
-│   └── ui/
-│       ├── App.tsx                  Upload, configuration, report, and history UI
-│       ├── history.ts                IndexedDB persistence
-│       └── styles.css                Local laboratory interface styling
-├── tests/
-│   └── fixtures/                    Generated and hand-crafted image fixtures
-├── e2e/
-│   ├── steps.spec.ts                Browser workflow and large-raster tests
-│   └── network.spec.ts              Offline, no-request, CSP, and history tests
-├── docs/
-│   └── network-checks.md            Manual Chrome verification procedure
-├── experiments/
-│   └── README.md                    Experiment methodology
-├── scripts/
-│   ├── generate-fixtures.mjs        Deterministic fixture generator
-│   └── run-experiments.mjs          Repeated browser experiment harness
-└── experiments.csv                  Generated experiment results
+┌───────────────┐
+│     Bytes     │
+│     Blob      │
+└───────┬───────┘
+        │ decode
+        ▼
+┌───────────────┐
+│     Raster    │
+│ OffscreenCanvas
+└───────┬───────┘
+        │ transform
+        ▼
+┌───────────────┐
+│     Raster    │
+└───────┬───────┘
+        │ encode
+        ▼
+┌───────────────┐
+│     Bytes     │
+│     Blob      │
+└───────────────┘
 ```
 
-## Architecture
-
-The system is organized into six cooperating layers.
-
-### Application layer
-
-`src/main.tsx` mounts the React application. `src/ui/App.tsx` owns user-facing state:
-
-- selected file;
-- drag-and-drop state;
-- inline versus Worker mode;
-- pipeline preset and editable pipeline JSON;
-- running and cancellation state;
-- output preview and download name;
-- current report;
-- history sorting, export, and deletion.
-
-The UI does not implement image algorithms itself. It selects a runner and passes a file plus a pipeline specification into the core execution layer.
-
-### Runner layer
-
-The `Runner` interface defines one operation:
-
-```ts
-run(input: Blob, specs: readonly StepSpec[], ctx: Ctx): Promise<Bytes>
-```
-
-`InlineRunner` invokes the core pipeline directly. `WorkerRunner` creates a module worker, sends the file and step specifications, listens for a matching run identifier, and merges the returned report into the caller's context.
-
-Both runners intentionally share the same pipeline engine. This prevents worker mode and inline mode from becoming two separate implementations with different behavior.
-
-### Pipeline engine
-
-`runPipeline` performs four important jobs:
-
-1. Resolve every `StepSpec` through the registry.
-2. Validate stage compatibility before executing any step.
-3. Execute steps in order while checking cancellation between steps.
-4. Record step timing, raster memory, original pixels, user agent, and final output size.
-
-The engine starts with a `Bytes` payload and requires the final payload to return to `Bytes`. Raster payloads are represented by `OffscreenCanvas` and byte payloads by `Blob`.
-
-The first raster encountered is copied into `ctx.original`. Comparisons later in the pipeline therefore measure the transformed output against a detached original snapshot rather than against a mutated canvas.
-
-### Registry and step layer
-
-Each built-in step registers a factory under a unique string type. The registry provides:
-
-- duplicate-type protection;
-- explicit unknown-step errors;
-- options passed into factories;
-- a single discovery mechanism used by both inline and worker execution.
-
-This keeps the engine generic. A step only needs to declare its name, input stage, output stage, and `run` function.
-
-### Reporting layer
-
-The report separates facts by purpose:
+These concepts became explicit TypeScript contracts:
 
 ```text
-input        SHA-256, metadata, input byte count
-output       SHA-256, metadata, output byte count, encoding, resize
-comparison   pixelDiff, PSNR, SSIM, pHash, dHash, metric errors
-timings      milliseconds keyed by step name
-rasterBytes  width × height × 4 keyed by raster-producing step
-userAgent    browser identity for reproducibility context
+Bytes
+Raster
+Payload
+Stage
+Step
+StepSpec
+Ctx
+Report
 ```
 
-Metric failures are recorded under `comparison.errors` where possible so one unsupported or incompatible comparison does not hide the rest of the report.
-
-### Persistence layer
-
-Run history is stored in the browser's IndexedDB database `pixelproof-local`, object store `runs`. A history entry contains the run identity, timestamp, input filename, runner, pipeline, input/output byte sizes, and report.
-
-The UI can reload history, sort it, export it as CSV, and delete individual entries. The data remains local to the browser profile.
-
-## The standard audit pipeline
-
-`buildAuditPipeline` converts high-level options into a complete sequence of step specifications. For a standard run, the pipeline is:
+This prevents invalid operations such as:
 
 ```text
-1.  hash(input)
-2.  inspectMetadata(input)
-3.  decode
-4.  optional transform: grayscale OR resize
-5.  encode(requested output type)
-6.  hash(output)
-7.  inspectMetadata(output)
-8.  decode output
-9.  pixelDiff
-10. PSNR in channel mode
-11. SSIM in channel mode
-12. dHash comparison
-13. pHash comparison
-14. encode again for the final returned Blob
+hash(Raster)       ❌
+encode(Bytes)      ❌
+decode(Raster)     ❌
+
+hash(Bytes)        ✅
+decode(Bytes)      ✅
+encode(Raster)     ✅
 ```
 
-The second decode is intentional. It measures the raster that the browser actually reconstructed from the encoded output, not merely the in-memory raster before encoding. That is what makes the quality metrics relevant to the produced file.
+The goal was to make invalid pipelines fail **before execution**, rather than discovering the problem halfway through processing.
+
+---
+
+# ⚙️ Stage 2 — Build the Pipeline Engine
+
+Once the data model existed, the next problem was execution.
+
+PixelProof separates:
+
+```text
+UI
+ ↓
+Runner
+ ↓
+Pipeline Engine
+ ↓
+Registry
+ ↓
+Step
+```
+
+### Architecture schema
 
-### Phase 1: input identity
+```mermaid
+flowchart TB
 
-The input `Blob` is hashed with SHA-256. This provides a stable byte-level identifier for the source file and allows experiment output to distinguish an unchanged byte stream from a transformed one.
+    UI["UI<br/>React"]
 
-### Phase 2: input metadata inspection
+    RUNNER["Runner Abstraction"]
 
-The metadata step scans the original byte container without requiring a server-side parser. It identifies selected metadata families:
+    ENGINE["runPipeline()"]
 
-- JPEG APP1, APP2, and APP13 markers;
-- JPEG EXIF GPS latitude and longitude when present;
-- PNG `eXIf`, `iTXt`, `iCCP`, and `tEXt` chunks;
-- WebP `EXIF`, `XMP `, and `ICCP` chunks.
+    REGISTRY["Step Registry"]
 
-The parser is defensive about container boundaries, byte order, TIFF offsets, and missing fields. It reports presence and supported values rather than claiming to preserve every possible metadata field.
+    STEPS["Processing Steps"]
 
-### Phase 3: decoding and original capture
+    REPORT["Audit Context / Report"]
 
-The decoder validates JPEG, PNG, or WebP magic bytes before calling `createImageBitmap`. This rejects mislabeled or corrupt input earlier and avoids sending clearly invalid content into the browser decoder.
+    UI --> RUNNER
+    RUNNER --> ENGINE
+    ENGINE --> REGISTRY
+    REGISTRY --> STEPS
+    ENGINE --> REPORT
+    STEPS --> REPORT
+```
 
-The bitmap is drawn onto an `OffscreenCanvas`. The pipeline engine captures the first raster as the comparison baseline.
+### The engine validates
 
-### Phase 4: optional transformation
+Before the first step executes:
 
-The current presets support:
+```text
+StepSpec
+   │
+   ├── known step?            ✓
+   ├── valid options?         ✓
+   ├── valid input stage?     ✓
+   ├── valid output stage?    ✓
+   ├── duplicate registration?✓
+   └── ends in Bytes?         ✓
+```
 
-- no transform;
-- grayscale using the luma coefficients `0.2126`, `0.7152`, and `0.0722`;
-- aspect-preserving resize to a maximum width.
+Only after the complete pipeline passes validation does execution begin.
 
-Resize records whether it was applied and records the original and resulting dimensions. Grayscale changes RGB channels while leaving alpha untouched.
+This turns image processing into a **declared and validated execution model**.
 
-### Phase 5: encoding
+---
 
-The encoder supports requested PNG, JPEG, and WebP output types through `OffscreenCanvas.convertToBlob`.
+# 🔌 Stage 3 — Build the Transformation Path
 
-JPEG cannot represent transparency in the same way as the source raster, so the encoder first paints a configurable background, defaulting to white, then draws the raster over it. The report records the requested type, actual type, dimensions, and any browser fallback.
+The actual image-processing path uses browser-native primitives.
 
-### Phase 6: output identity and metadata
+```text
+Blob
+ │
+ ▼
+Magic-byte validation
+ │
+ ▼
+createImageBitmap
+ │
+ ▼
+OffscreenCanvas
+ │
+ ├───────────────┐
+ │               │
+ ▼               ▼
+Grayscale      Resize
+ │               │
+ └───────┬───────┘
+         ▼
+   OffscreenCanvas
+         │
+         ▼
+convertToBlob()
+         │
+         ▼
+       Blob
+```
 
-The encoded output receives its own SHA-256 hash and metadata scan. Comparing input and output reports makes byte and container changes explicit.
+### Current transformation primitives
 
-### Phase 7: quality measurement
+| Operation   | Purpose                                |
+| ----------- | -------------------------------------- |
+| `decode`    | Validate and decode JPEG / PNG / WebP  |
+| `grayscale` | Luma-based grayscale transformation    |
+| `resize`    | Aspect-preserving maximum-width resize |
+| `encode`    | PNG / JPEG / WebP output               |
 
-The output is decoded again and compared to the original snapshot:
+The grayscale transform uses:
 
-- `pixelDiff` reports maximum absolute channel difference, changed-pixel count, and changed-pixel percentage;
-- `PSNR` reports luma and, in channel mode, red/green/blue values;
-- `SSIM` reports luma and optional per-channel structural similarity;
-- `dHash` compares local horizontal brightness gradients;
-- `pHash` downsamples to a 32×32 grayscale image, computes low-frequency DCT coefficients, thresholds them, and compares the resulting hash with Hamming distance.
+```text
+R × 0.2126
+G × 0.7152
+B × 0.0722
+```
 
-Exact pixel metrics require equal raster dimensions. A resize may therefore produce a metric error instead of a misleading comparison; the rest of the report remains available.
+Alpha is preserved.
 
-### Phase 8: telemetry and result delivery
+Resize records both original and resulting dimensions.
 
-The runner records elapsed time per step and the memory footprint of each raster stage using `width × height × 4`. It returns the final `Blob` to the UI, which creates a preview URL and a format-appropriate download name.
+---
 
-## User workflow
+# 🔬 Stage 4 — Turn Processing Into Measurement
 
-1. Start the application.
-2. Drop an image onto the upload area or select one from the file picker.
-3. Choose Worker or Inline execution.
-4. Choose a preset or edit the pipeline JSON.
-5. Run the pipeline.
-6. Inspect the output preview and report.
-7. Download the output image if desired.
-8. Review, sort, export, or delete the local run history.
+This is where the project becomes more than a browser image-processing application.
 
-The editable pipeline field makes the application useful as an exploration tool: a user can inspect the exact declared steps rather than choosing from opaque buttons only.
+The system measures several independent forms of evidence.
 
-## Development phases represented by the repository
+```mermaid
+flowchart LR
 
-The codebase can be understood as a sequence of engineering phases.
+    ORIGINAL["Original"]
 
-### Phase A — establish a standalone browser foundation
+    PROCESS["Transformation"]
 
-The project begins with Vite, TypeScript, React, and browser-native APIs. The dependency set is intentionally small and pinned in `package.json`. There is no runtime server application and no cross-repository import.
+    OUTPUT["Output"]
 
-Deliverable: a buildable browser application with a clear entry point and repeatable npm scripts.
+    ORIGINAL --> PROCESS --> OUTPUT
 
-### Phase B — define the domain contracts
+    ORIGINAL -.-> SHA1["SHA-256"]
+    OUTPUT -.-> SHA2["SHA-256"]
 
-`types.ts` defines the central vocabulary: bytes, raster, stages, payloads, contexts, reports, steps, and step specifications.
+    ORIGINAL -.-> META1["Metadata"]
+    OUTPUT -.-> META2["Metadata"]
 
-Deliverable: the rest of the application can share strong contracts instead of passing untyped image state between unrelated functions.
+    ORIGINAL -.-> PIX1["Raster"]
+    OUTPUT -.-> PIX2["Raster"]
 
-### Phase C — build a safe extensible pipeline engine
+    PIX1 --> DIFF["pixelDiff"]
+    PIX2 --> DIFF
 
-The registry and runner were separated from individual algorithms. The engine validates wiring, resolves factories, supports cancellation, captures the original raster, and records telemetry.
+    PIX1 --> PSNR["PSNR"]
+    PIX2 --> PSNR
 
-Deliverable: new steps can be added without rewriting orchestration, while invalid pipelines fail before partial execution.
+    PIX1 --> SSIM["SSIM"]
+    PIX2 --> SSIM
 
-### Phase D — implement the image transformation primitives
+    PIX1 --> DHASH["dHash"]
+    PIX2 --> DHASH
 
-Decode, resize, grayscale, and encode provide the transformation path. Browser-native `OffscreenCanvas` keeps the implementation local and supports worker execution.
+    PIX1 --> PHASH["pHash"]
+    PIX2 --> PHASH
+```
 
-Deliverable: actual images can move from bytes to raster and back to bytes with explicit format and size behavior.
+## Measurement stack
 
-### Phase E — add forensic and perceptual evidence
+| Layer              | Measurement                     | Question answered                       |
+| ------------------ | ------------------------------- | --------------------------------------- |
+| 🔐 **Identity**    | SHA-256                         | Are the bytes exactly the same?         |
+| 🧬 **Structure**   | Metadata / container inspection | What changed in the file structure?     |
+| 🔬 **Pixels**      | Exact pixel difference          | Which pixels changed?                   |
+| 📐 **Numerical**   | PSNR                            | How large is the numerical error?       |
+| 🧱 **Structural**  | SSIM                            | How much structural similarity remains? |
+| 👁️ **Perceptual** | dHash / pHash                   | How similar is the visual structure?    |
+| 📏 **Geometry**    | Dimensions                      | Did image size change?                  |
+| ⚙️ **Runtime**     | Timing / raster bytes           | What did processing cost?               |
 
-Hashing, metadata scanning, pixel difference, PSNR, SSIM, dHash, and pHash extend the project from conversion into auditing.
+No individual metric is treated as the truth.
 
-Deliverable: a single run can explain not only that output changed, but what kind of change occurred.
+The project deliberately keeps multiple forms of evidence together.
 
-### Phase F — make execution production-like
+---
 
-Worker mode, cancellation, error handling, object URL cleanup, local history, sorting, CSV export, and browser reload persistence make the laboratory usable beyond a unit-test harness.
+# 🧬 Metadata Inspection
 
-Deliverable: users can run large images, inspect results, preserve evidence locally, and recover history after reload.
+PixelProof inspects selected structures directly from the encoded bytes.
 
-### Phase G — verify privacy and behavior end to end
+### JPEG
 
-Vitest covers contracts and metric algorithms. Playwright tests the built production preview, worker behavior, drag-and-drop, offline execution, no-request behavior, CSP headers, history persistence, export, and deletion.
+```text
+APP1
+APP2
+APP13
+EXIF GPS latitude / longitude
+```
 
-Deliverable: important architectural claims are executable tests rather than undocumented intentions.
+### PNG
 
-### Phase H — measure repeatability with experiments
+```text
+eXIf
+iTXt
+iCCP
+tEXt
+```
 
-The experiment script runs every fixture through four pipelines and repeats each case. It rejects nondeterministic result fields and writes a CSV suitable for inspection or later analysis.
+### WebP
 
-Deliverable: the project can produce evidence about its own behavior across transformations and fixtures.
+```text
+EXIF
+XMP
+ICCP
+```
 
-## Built-in pipeline presets
+The parser is defensive about:
 
-The UI currently exposes four presets:
+```text
+container boundaries
+byte order
+TIFF offsets
+missing fields
+```
 
-| Preset | Transformation | Output | Purpose |
-| --- | --- | --- | --- |
-| `no-transform-png` | None | PNG | Baseline browser re-encode |
-| `no-transform-jpeg` | None | JPEG, quality `0.92` | Lossy encoding comparison |
-| `grayscale-png` | Luma grayscale | PNG | Color-to-luma transformation |
-| `resize-2400-png` | Maximum width `2400` | PNG | Dimension and scaling comparison |
+The implementation reports what it can actually identify rather than claiming complete metadata coverage.
 
-## Tests and verification strategy
+---
 
-### Unit and integration tests
+# 🧮 Pixel and Quality Measurements
 
-The Vitest suites cover:
+After encoding, the output is **decoded again**.
 
-- invalid stage wiring;
-- unknown steps;
-- cancellation between steps;
-- timing and raster memory recording;
-- requirement that a pipeline ends in bytes;
-- factory option forwarding;
-- image magic validation before decoding;
-- stable SHA-256 output for identical bytes;
-- explicit input/output targets for byte-reporting steps;
-- preservation of original pixels through transformations;
-- duplicate registry protection;
-- exact and inverted-image metric behavior;
-- per-channel detection of changes that luma can hide;
-- unequal-dimension rejection;
-- Hamming edge cases;
-- JPEG, PNG, and WebP metadata containers;
-- EXIF/GPS extraction from a real fixture.
+That second decode is intentional.
 
-### Browser end-to-end tests
+```text
+Original raster
+      │
+      │
+      ├───────────────┐
+      │               │
+      ▼               ▼
+   Transform       Output file
+                      │
+                      ▼
+                Decode output
+                      │
+                      ▼
+              Reconstructed raster
+                      │
+                      ▼
+                Compare with
+                original snapshot
+```
 
-The Playwright tests run against the built production preview rather than only the development server. They verify:
+This means the measurements reflect the raster that the browser actually reconstructed from the produced file.
 
-- the default page and controls;
-- Worker and Inline selection;
-- processing and output preview;
-- output download naming;
-- report fields;
-- drag-and-drop selection;
-- a 12-megapixel Worker run;
-- zero external requests after file selection;
-- successful operation while offline;
-- absence of forbidden network APIs in source;
-- same-origin document and worker loading;
-- production CSP headers;
-- history persistence across reload;
-- history sorting, CSV export, and deletion.
+### `pixelDiff`
 
-### Fixtures
+Records:
 
-Fixtures are generated locally and cover transparent PNG, RGB color data, large dimensions, EXIF/GPS JPEG, corrupt bytes, a PNG with a `.jpg` filename, and other deterministic cases. This deliberately tests both valid inputs and misleading or invalid input conditions.
+```text
+maximum channel difference
+changed-pixel count
+changed-pixel percentage
+```
 
-## Experiments
+### PSNR
 
-Run the experiment harness with:
+Records:
+
+```text
+luma PSNR
+red
+green
+blue
+```
+
+### SSIM
+
+Records:
+
+```text
+luma similarity
+optional channel-level similarity
+```
+
+### dHash
+
+Measures local brightness-gradient similarity.
+
+### pHash
+
+Uses low-frequency DCT-based perceptual comparison and Hamming distance.
+
+Exact pixel comparison requires compatible raster dimensions. When dimensions differ, the report records the metric as unavailable rather than falsely reporting equality.
+
+---
+
+# 🧷 The Baseline Principle
+
+One of the important architectural decisions is:
+
+> **Never let the comparison baseline move with the transformation.**
+
+The first decoded raster is copied into:
+
+```text
+ctx.original
+```
+
+before transformations can mutate the working raster.
+
+```mermaid
+flowchart LR
+
+    DECODE["Decode input"]
+
+    SNAP["Capture detached<br/>original snapshot"]
+
+    WORK["Working raster"]
+
+    TRANSFORM["Transform"]
+
+    COMPARE["Compare output<br/>against snapshot"]
+
+    DECODE --> SNAP
+    DECODE --> WORK
+    WORK --> TRANSFORM --> COMPARE
+    SNAP --> COMPARE
+```
+
+This keeps the experiment anchored to the actual input state.
+
+---
+
+# 🧵 Stage 5 — Separate UI Work From Image Work
+
+Large images can become expensive to process on the main browser thread.
+
+PixelProof solves this with a shared Runner abstraction.
+
+```mermaid
+flowchart TB
+
+    PIPE["One pipeline specification"]
+
+    PIPE --> INLINE["InlineRunner"]
+    PIPE --> WORKER["WorkerRunner"]
+
+    INLINE --> ENGINE["Same runPipeline()"]
+    WORKER --> ENGINE
+
+    ENGINE --> REGISTRY["Same Step Registry"]
+    REGISTRY --> STEPS["Same Processing Steps"]
+```
+
+The important property is:
+
+> **Worker mode changes where the pipeline runs, not what the pipeline means.**
+
+### Worker protocol
+
+```text
+Run Request
+    │
+    ├── runId
+    ├── Blob
+    └── StepSpec[]
+         │
+         ▼
+     Worker
+         │
+         ├── execute
+         ├── cancellation checks
+         └── report
+         │
+         ▼
+   Matching runId
+         │
+         ▼
+       UI
+```
+
+It supports:
+
+* unique run identifiers;
+* result messages;
+* error messages;
+* `AbortController` cancellation;
+* controller cleanup;
+* report transfer.
+
+The E2E suite also processes a **12-megapixel raster through WorkerRunner**.
+
+---
+
+# 🔒 Stage 6 — Make Privacy Testable
+
+PixelProof is designed to process files locally.
+
+The privacy boundary is:
+
+```mermaid
+flowchart LR
+
+    FILE["📁 User File"]
+
+    BROWSER["🌐 Browser"]
+
+    PIPELINE["⚙️ Local Pipeline"]
+
+    REPORT["📋 Report"]
+
+    HISTORY["💾 IndexedDB"]
+
+    INTERNET["☁️ External Network"]
+
+    FILE --> BROWSER
+    BROWSER --> PIPELINE
+    PIPELINE --> REPORT
+    REPORT --> HISTORY
+
+    INTERNET -. "No processing dependency" .-> PIPELINE
+```
+
+The project does not introduce:
+
+```text
+❌ Application backend
+❌ Database server
+❌ Cloud image storage
+❌ Remote image-processing API
+```
+
+Network tests verify that processing:
+
+* creates no external HTTP requests;
+* works while offline;
+* avoids common network-capable processing APIs such as `fetch`, `XMLHttpRequest`, `WebSocket`, `FormData`, `EventSource`, and `sendBeacon`.
+
+The production preview also applies:
+
+```text
+default-src 'self';
+connect-src 'none';
+worker-src 'self' blob:;
+img-src 'self' blob: data:
+```
+
+The important distinction is that the privacy boundary is not presented only as a statement.
+
+**It is tested.**
+
+---
+
+# 🧪 Stage 7 — Turn the System Into an Experiment Platform
+
+A laboratory needs repeatability.
+
+PixelProof therefore includes deterministic fixtures and an experiment harness.
+
+```mermaid
+flowchart LR
+
+    FIX["Deterministic Fixtures"]
+
+    PIPES["4 Standard Pipelines"]
+
+    REPEAT["Repeat Each Run"]
+
+    CHECK["Check Stable Fields"]
+
+    CSV["experiments.csv"]
+
+    FIX --> PIPES
+    PIPES --> REPEAT
+    REPEAT --> CHECK
+    CHECK --> CSV
+```
+
+Run:
 
 ```bash
 npm run experiments -- --runs=3 --out=experiments.csv
 ```
 
-The harness starts a local Vite page, loads every fixture, runs the four standard pipelines through `InlineRunner`, and repeats each fixture/pipeline pair. It checks stable output fields and writes:
+The harness records:
 
-- fixture name;
-- pipeline name;
-- whether the SHA changed;
-- pHash and dHash distances;
-- maximum pixel difference;
-- changed-pixel percentage;
-- PSNR and SSIM;
-- total measured step time;
-- input and output bytes;
-- raster memory;
-- user agent.
+```text
+fixture
+pipeline
+SHA change
+pHash distance
+dHash distance
+maximum pixel difference
+changed-pixel percentage
+PSNR
+SSIM
+step timing
+input bytes
+output bytes
+raster memory
+user agent
+```
 
-Timing is recorded for observation but is not required to be identical across repetitions.
+Timing is treated as an observation rather than deterministic identity.
 
-## Getting started
+Quality and output fields are checked for stability across repetitions.
 
-### Requirements
+---
 
-- Node.js with npm;
-- a browser supported by Playwright for E2E tests;
-- the dependencies installed from the committed lockfile.
+# 📊 Audit Report Schema
 
-### Install
+Every run produces a structured report.
+
+```text
+REPORT
+│
+├── input
+│   ├── sha256
+│   ├── metadata
+│   └── byteCount
+│
+├── output
+│   ├── sha256
+│   ├── metadata
+│   ├── byteCount
+│   ├── encoding
+│   └── resize
+│
+├── comparison
+│   ├── pixelDiff
+│   ├── PSNR
+│   ├── SSIM
+│   ├── pHash
+│   ├── dHash
+│   └── errors
+│
+├── timings
+│   └── step → milliseconds
+│
+├── rasterBytes
+│   └── step → width × height × 4
+│
+└── userAgent
+```
+
+This separation allows the report to distinguish:
+
+```text
+BYTE CHANGE
+     ≠
+PIXEL CHANGE
+     ≠
+METADATA CHANGE
+     ≠
+VISUAL CHANGE
+     ≠
+PROCESSING COST
+```
+
+That distinction is fundamental to the project.
+
+---
+
+# 🧩 Step Schema
+
+Each operation is represented as a declared `StepSpec`.
+
+```text
+┌─────────────────────────────┐
+│          StepSpec            │
+├─────────────────────────────┤
+│ type                        │
+│ options                     │
+│ inputStage                  │
+│ outputStage                 │
+└──────────────┬──────────────┘
+               │
+               ▼
+        Registry.resolve()
+               │
+               ▼
+        Step Factory
+               │
+               ▼
+          Step.run()
+               │
+               ▼
+          New Payload
+```
+
+This gives the system:
+
+* duplicate-type protection;
+* explicit unknown-step errors;
+* option forwarding;
+* stage validation;
+* common discovery for Inline and Worker execution.
+
+Adding a step does not require rewriting the pipeline engine.
+
+---
+
+# 🔄 Standard Audit Pipeline
+
+The built-in audit pipeline is:
+
+```text
+01  hash(input)
+        ↓
+02  inspectMetadata(input)
+        ↓
+03  decode
+        ↓
+04  optional transform
+        ├── grayscale
+        └── resize
+        ↓
+05  encode(requested type)
+        ↓
+06  hash(output)
+        ↓
+07  inspectMetadata(output)
+        ↓
+08  decode output
+        ↓
+09  pixelDiff
+        ↓
+10  PSNR
+        ↓
+11  SSIM
+        ↓
+12  dHash
+        ↓
+13  pHash
+        ↓
+14  final Blob
+```
+
+The pipeline can be represented conceptually as:
+
+```mermaid
+flowchart LR
+
+    B1["BYTES"] --> H1["HASH"]
+    H1 --> M1["METADATA"]
+    M1 --> D["DECODE"]
+
+    D --> R["RASTER"]
+
+    R --> T["OPTIONAL TRANSFORM"]
+
+    T --> E["ENCODE"]
+
+    E --> B2["BYTES"]
+
+    B2 --> H2["HASH"]
+    H2 --> M2["METADATA"]
+    M2 --> D2["DECODE"]
+
+    D2 --> C["COMPARE"]
+
+    R -. original snapshot .-> C
+
+    C --> PD["pixelDiff"]
+    C --> PSNR["PSNR"]
+    C --> SSIM["SSIM"]
+    C --> DH["dHash"]
+    C --> PH["pHash"]
+```
+
+---
+
+# 🖥️ Browser Application
+
+The browser UI exposes the laboratory without taking image-processing logic into the presentation layer.
+
+```text
+Upload
+  ↓
+Choose Runner
+  ↓
+Choose / Edit Pipeline
+  ↓
+Run
+  ↓
+Output Preview
+  ↓
+Audit Report
+  ↓
+Local History
+```
+
+The user can:
+
+* select a file;
+* drag and drop an image;
+* choose Inline or Worker execution;
+* select a preset;
+* edit pipeline JSON;
+* start processing;
+* cancel processing;
+* inspect the resulting report;
+* preview the output;
+* download the output;
+* reload saved history;
+* sort history;
+* export history as CSV;
+* delete individual records.
+
+---
+
+# 🗂️ Built-in Presets
+
+| Preset              | Transform        | Output      | Purpose                          |
+| ------------------- | ---------------- | ----------- | -------------------------------- |
+| `no-transform-png`  | None             | PNG         | Baseline browser re-encode       |
+| `no-transform-jpeg` | None             | JPEG `0.92` | Lossy encoding comparison        |
+| `grayscale-png`     | Luma grayscale   | PNG         | Color → luma transformation      |
+| `resize-2400-png`   | Max width `2400` | PNG         | Scaling and dimension comparison |
+
+---
+
+# 🧪 Verification Matrix
+
+The verification strategy operates at several levels.
+
+```text
+                    PIXELPROOF VERIFICATION
+                              │
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+          ▼                   ▼                   ▼
+       UNIT TESTS           E2E TESTS          EXPERIMENTS
+          │                   │                   │
+          ▼                   ▼                   ▼
+     Core contracts      Browser behavior      Repeatability
+     Metric algorithms  Worker execution      Determinism
+     Registry            Offline operation    Measurements
+     Pipeline            CSP / network        CSV evidence
+```
+
+## Unit / integration coverage
+
+Vitest checks:
+
+* invalid stage wiring;
+* unknown steps;
+* cancellation;
+* timing;
+* raster-memory recording;
+* pipeline termination in bytes;
+* option forwarding;
+* magic-byte validation;
+* SHA-256 stability;
+* explicit report targets;
+* original-pixel preservation;
+* duplicate registry protection;
+* metric behavior;
+* unequal dimensions;
+* Hamming edge cases;
+* metadata containers;
+* EXIF/GPS extraction.
+
+## Browser E2E coverage
+
+Playwright checks:
+
+* default page;
+* controls;
+* Inline / Worker selection;
+* processing;
+* output preview;
+* download naming;
+* report fields;
+* drag-and-drop;
+* 12-megapixel Worker processing;
+* zero external requests;
+* offline execution;
+* forbidden network APIs;
+* same-origin loading;
+* CSP headers;
+* history persistence;
+* sorting;
+* CSV export;
+* deletion.
+
+---
+
+# 🧱 Deterministic Fixtures
+
+Fixtures are generated locally.
+
+They cover:
+
+```text
+transparent PNG
+RGB color data
+large dimensions
+EXIF/GPS JPEG
+corrupt bytes
+PNG content with .jpg filename
+other deterministic edge cases
+```
+
+Generate them with:
+
+```bash
+node scripts/generate-fixtures.mjs
+```
+
+This intentionally tests both:
+
+```text
+valid input
+    +
+misleading / invalid input
+```
+
+---
+
+# 📦 Persistence Schema
+
+Run history lives entirely inside browser storage.
+
+```text
+IndexedDB
+│
+└── pixelproof-local
+    │
+    └── runs
+        │
+        ├── run identity
+        ├── timestamp
+        ├── filename
+        ├── runner
+        ├── pipeline
+        ├── input size
+        ├── output size
+        └── report
+```
+
+History can be:
+
+```text
+reloaded
+sorted
+exported
+deleted
+```
+
+No remote database is required.
+
+---
+
+# 🛡️ Security & Privacy Model
+
+```text
+                    LOCAL BROWSER
+┌──────────────────────────────────────────────────┐
+│                                                  │
+│  User File                                      │
+│      │                                           │
+│      ▼                                           │
+│  Decode                                          │
+│      │                                           │
+│      ▼                                           │
+│  Transform                                       │
+│      │                                           │
+│      ▼                                           │
+│  Encode                                          │
+│      │                                           │
+│      ├── Audit Report                            │
+│      │                                           │
+│      └── IndexedDB History                       │
+│                                                  │
+└──────────────────────────────────────────────────┘
+                       │
+                       X
+                 External Network
+```
+
+Implemented protections include:
+
+* browser-local processing;
+* no image-content upload;
+* IndexedDB-only history;
+* preview URL cleanup;
+* Worker cancellation;
+* restrictive CSP;
+* network behavior tests;
+* offline execution tests.
+
+---
+
+# 📐 Engineering Principles
+
+## 01 — Separate bytes from pixels
+
+`Bytes` and `Raster` are different categories with different valid operations.
+
+---
+
+## 02 — Validate before execution
+
+An invalid pipeline should fail before partial processing begins.
+
+---
+
+## 03 — Preserve the original
+
+The comparison baseline must remain detached from transformation state.
+
+---
+
+## 04 — Never trust a single metric
+
+Exact identity, pixel difference, structural similarity, perceptual similarity, and metadata all describe different aspects of the result.
+
+---
+
+## 05 — Record what the browser actually did
+
+Requested encoding and actual encoding are both recorded.
+
+---
+
+## 06 — Keep measurements honest
+
+Unavailable comparisons are reported as unavailable.
+
+Timing is recorded as observation rather than deterministic identity.
+
+---
+
+## 07 — Make important claims executable
+
+Offline behavior, network isolation, CSP, Worker processing, persistence, and core pipeline contracts are backed by tests.
+
+---
+
+# 🧭 Architecture at a Glance
+
+```mermaid
+flowchart TB
+
+    APP["🖥️ APPLICATION<br/>React UI"]
+
+    RUN["🏃 RUNNERS<br/>Inline / Worker"]
+
+    CORE["⚙️ CORE ENGINE<br/>Validation · Execution · Cancellation"]
+
+    REG["🔌 REGISTRY<br/>Step discovery"]
+
+    STEPS["🧩 STEPS<br/>Decode · Transform · Encode · Metrics"]
+
+    EVIDENCE["🔬 EVIDENCE<br/>Hash · Metadata · Pixel · Quality"]
+
+    STORE["💾 LOCAL STORAGE<br/>IndexedDB · CSV"]
+
+    EXP["🧪 EXPERIMENTS<br/>Fixtures · Repetition"]
+
+    APP --> RUN
+    RUN --> CORE
+    CORE --> REG
+    REG --> STEPS
+    STEPS --> EVIDENCE
+    EVIDENCE --> STORE
+    EVIDENCE --> EXP
+```
+
+---
+
+# 📁 Repository Structure
+
+```text
+.
+├── index.html
+├── package.json
+├── vite.config.ts
+├── playwright.config.ts
+├── tsconfig*.json
+│
+├── src/
+│   ├── main.tsx
+│   ├── browser-entry.ts
+│   │
+│   ├── core/
+│   │   ├── types.ts
+│   │   ├── registry.ts
+│   │   ├── report.ts
+│   │   ├── run.ts
+│   │   ├── runner.ts
+│   │   └── auditPipeline.ts
+│   │
+│   ├── steps/
+│   │   ├── index.ts
+│   │   ├── decode.ts
+│   │   ├── resize.ts
+│   │   ├── grayscale.ts
+│   │   ├── encode.ts
+│   │   ├── hash.ts
+│   │   ├── inspectMetadata.ts
+│   │   ├── pixelDiff.ts
+│   │   ├── psnr.ts
+│   │   ├── ssim.ts
+│   │   ├── dhash.ts
+│   │   ├── phash.ts
+│   │   └── measurement-utils.ts
+│   │
+│   ├── worker/
+│   │   ├── WorkerRunner.ts
+│   │   └── worker.ts
+│   │
+│   └── ui/
+│       ├── App.tsx
+│       ├── history.ts
+│       └── styles.css
+│
+├── tests/
+│   └── fixtures/
+│
+├── e2e/
+│   ├── steps.spec.ts
+│   └── network.spec.ts
+│
+├── docs/
+│   └── network-checks.md
+│
+├── experiments/
+│   └── README.md
+│
+├── scripts/
+│   ├── generate-fixtures.mjs
+│   └── run-experiments.mjs
+│
+└── experiments.csv
+```
+
+---
+
+# 🛠️ Technology Foundation
+
+### Application
+
+```text
+React
+TypeScript
+Vite
+```
+
+### Browser-native processing
+
+```text
+Blob
+createImageBitmap
+OffscreenCanvas
+ImageData
+crypto.subtle
+IndexedDB
+Web Workers
+```
+
+### Verification
+
+```text
+Vitest
+Playwright
+```
+
+The runtime intentionally stays lightweight and browser-native.
+
+---
+
+# 🚀 Getting Started
+
+## Requirements
+
+* Node.js with npm;
+* a browser supported by Playwright for E2E tests;
+* dependencies installed from the committed lockfile.
+
+## Install
 
 ```bash
 npm install
 ```
 
-### Start the development server
+## Development
 
 ```bash
 npm run dev
 ```
 
-### Build the production bundle
+## Build
 
 ```bash
 npm run build
 ```
 
-### Preview the production bundle
+## Production preview
 
 ```bash
 npm run preview -- --host 127.0.0.1 --port 4173 --strictPort
 ```
 
-### Run checks
+## Checks
 
 ```bash
 npm run typecheck
@@ -494,91 +1309,144 @@ npm run lint
 npm run e2e
 ```
 
-The E2E command builds the project and starts its own production preview according to `playwright.config.ts`.
-
-### Regenerate fixtures
+## Regenerate fixtures
 
 ```bash
 node scripts/generate-fixtures.mjs
 ```
 
-## Design decisions and their reasoning
+## Run experiments
 
-### Browser-native image primitives
-
-Using `Blob`, `createImageBitmap`, `OffscreenCanvas`, `ImageData`, `crypto.subtle`, IndexedDB, and Web Workers keeps the runtime self-contained and avoids a server-side image dependency. It also makes the privacy boundary easy to test.
-
-### Explicit stages instead of implicit type assumptions
-
-A byte payload and a raster payload have different valid operations. Encoding a byte payload or hashing a raster payload would be a category error. The `bytes` and `raster` stage contracts make those errors visible at pipeline validation time.
-
-### Preserve the original before mutation
-
-Transforms such as grayscale mutate raster content. Capturing the original snapshot before those changes prevents the comparison baseline from moving with the transformation.
-
-### Use multiple metrics
-
-No individual metric answers every image-quality question. SHA-256 is exact but visually blind; pixel difference is direct but dimension-sensitive; PSNR and SSIM summarize different aspects of error; perceptual hashes are compact similarity signals. The project keeps them together so users can compare evidence instead of trusting one number.
-
-### Record browser fallbacks
-
-Encoding is capability-dependent. A request for WebP or another format may not produce the exact requested MIME type in every browser. The report records both requested and actual types so the result cannot silently misrepresent what happened.
-
-### Preserve errors inside the report where possible
-
-Comparison metrics may be impossible after a resize because dimensions differ. Recording a metric-specific error keeps the report useful and distinguishes “not comparable” from “identical.”
-
-## Security, privacy, and data handling
-
-- Input files are handled in the browser.
-- The application does not upload image contents.
-- Run history is stored in the browser's IndexedDB, not in a remote database.
-- Output preview URLs are revoked when replaced or unmounted.
-- Worker cancellation is connected to the current run's `AbortController`.
-- The production preview applies a restrictive CSP.
-- Network behavior is covered by automated and manual checks.
-
-Local browser storage is still user data. Clearing site data removes the saved run history. The application does not currently provide an encrypted export or cross-device synchronization mechanism.
-
-## Known boundaries
-
-The project is intentionally honest about what it measures:
-
-- It inspects selected metadata markers; it is not a complete metadata-preservation specification for every image format field.
-- Exact pixel comparison requires equal dimensions.
-- Browser codec availability can produce an encoder fallback.
-- Timing varies with browser, hardware, and execution conditions.
-- Perceptual metrics are implementation-level indicators, not a universal perceptual-quality score.
-- The UI is local-first and does not provide multi-user collaboration or remote job execution.
-
-These boundaries are surfaced in reports, errors, tests, or documentation rather than hidden.
-
-## A concise mental model
-
-```text
-User selects image
-        │
-        ▼
-Step specifications are built or edited
-        │
-        ▼
-InlineRunner or WorkerRunner
-        │
-        ▼
-Registry resolves each step
-        │
-        ▼
-bytes ──decode──> raster ──transform──> raster ──encode──> bytes
-  │                                                     │
-  ├── hash + metadata                                   ├── hash + metadata
-  └──────────────────── comparison metrics ─────────────┘
-        │
-        ▼
-Structured report + preview + local history
+```bash
+npm run experiments -- --runs=3 --out=experiments.csv
 ```
 
-## Final perspective
+---
 
-The effort invested in PixelProof Lab is visible in the separation of concerns and in the verification surface around the core idea. The project does not stop at implementing image operations. It defines contracts, validates pipeline wiring, isolates heavy work, captures a comparison baseline, measures several kinds of change, records resource behavior, persists evidence locally, tests offline guarantees, and provides a repeatable experiment path.
+# 🔭 Future Direction
 
-That combination is the project's main contribution: a standalone, inspectable, privacy-preserving way to turn image processing into a measurable audit rather than an opaque conversion.
+The existing architecture provides expansion points for:
+
+```text
+additional image metrics
+additional codecs
+new transformation steps
+additional browser/WASM implementations
+video processing
+text-based analysis
+larger experimental datasets
+deeper reproducibility tooling
+```
+
+The important property is that these can extend the existing contracts instead of requiring a rewrite of the core execution model.
+
+---
+
+# ⚠️ Known Boundaries
+
+PixelProof deliberately does not overclaim.
+
+* Metadata inspection covers selected markers rather than every possible metadata field.
+* Exact pixel comparison requires compatible dimensions.
+* Browser codec support can produce encoder fallbacks.
+* Timing varies with hardware and browser conditions.
+* Perceptual metrics are implementation-level indicators, not a universal quality score.
+* The project is local-first rather than a hosted multi-user service.
+* Local browser storage is still user data.
+* There is no encrypted export or cross-device synchronization.
+
+These boundaries are surfaced through reports, errors, tests, and documentation.
+
+---
+
+# 🎯 Why This Project Is Different
+
+Many image-processing projects stop here:
+
+```text
+image
+  ↓
+algorithm
+  ↓
+new image
+```
+
+PixelProof asks what happened **around** the algorithm.
+
+```text
+                 ┌──────────────┐
+                 │    IMAGE     │
+                 └──────┬───────┘
+                        │
+        ┌───────────────┼───────────────┐
+        │               │               │
+        ▼               ▼               ▼
+     IDENTITY        STRUCTURE       PIXELS
+     SHA-256         Metadata        pixelDiff
+        │               │               │
+        └───────────────┼───────────────┘
+                        │
+                        ▼
+                   TRANSFORM
+                        │
+                        ▼
+                ┌───────────────┐
+                │    OUTPUT     │
+                └───────┬───────┘
+                        │
+        ┌───────────────┼────────────────┐
+        │               │                │
+        ▼               ▼                ▼
+     QUALITY       PERCEPTION        EXECUTION
+   PSNR / SSIM     dHash / pHash     Time / Memory
+        │               │                │
+        └───────────────┼────────────────┘
+                        ▼
+                ┌───────────────┐
+                │    REPORT     │
+                └───────┬───────┘
+                        ▼
+                REPEATABLE EVIDENCE
+```
+
+---
+
+# 🏁 Final Perspective
+
+PixelProof Lab began with a simple question:
+
+> **What actually changed when an image was processed?**
+
+From that starting point, the project was developed into a complete standalone laboratory.
+
+The work expanded from the original concept into:
+
+```text
+QUESTION
+   ↓
+DOMAIN MODEL
+   ↓
+PIPELINE ENGINE
+   ↓
+TRANSFORMATION SYSTEM
+   ↓
+MEASUREMENT ENGINE
+   ↓
+WORKER EXECUTION
+   ↓
+PRIVACY / ISOLATION
+   ↓
+VERIFICATION
+   ↓
+EXPERIMENTATION
+   ↓
+EVIDENCE
+```
+
+The important contribution is not any single operation such as grayscale, resizing, hashing, or perceptual comparison.
+
+It is the **system built around the question**.
+
+PixelProof provides a way to take an image transformation that would normally be treated as an opaque input/output operation and turn it into a **structured, measurable, locally reproducible experiment**.
+
+> ### **Image processing becomes evidence — not just output.**
